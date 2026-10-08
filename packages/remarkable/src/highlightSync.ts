@@ -1,4 +1,5 @@
 import { sendHighlight, type ManifestStore, type ReadwiseClient, type SendStatus } from '@inkwise/core';
+import type { AssembledHighlight } from './assemble.js';
 import type { XochitlOutput } from './xochitl.js';
 
 export interface DeviceHighlightResult {
@@ -16,6 +17,8 @@ export async function sendDeviceHighlights(deps: {
   client: ReadwiseClient;
   manifest: ManifestStore;
   output: XochitlOutput;
+  /** Called after each highlight is handled, e.g. to print it. */
+  onHighlight?: (filename: string, highlight: AssembledHighlight, status: SendStatus, message: string) => void;
 }): Promise<DeviceHighlightResult> {
   const result: DeviceHighlightResult = { counts: {}, unlocated: 0 };
   for (const { filename, uuid } of await deps.output.documents()) {
@@ -24,6 +27,7 @@ export async function sendDeviceHighlights(deps: {
       // The Inkwise filename carries the Reader id, which is how core finds the document.
       const r = await sendHighlight({ client: deps.client, manifest: deps.manifest, filePath: filename, text: h.text });
       result.counts[r.status] = (result.counts[r.status] ?? 0) + 1;
+      deps.onHighlight?.(filename, h, r.status, r.message);
     }
   }
   return result;

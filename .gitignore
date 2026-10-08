@@ -7,3 +7,4 @@ out/
 coverage/
 packages/plugin/build/
 *.snplg
+packages/remarkable/dist-device/

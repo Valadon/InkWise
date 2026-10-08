@@ -10,7 +10,8 @@
     "src"
   ],
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "build:device": "bun build --compile --target=bun-linux-arm64 --define process.env.INKWISE_VERSION=\\\"$npm_package_version\\\" src/main.ts --outfile dist-device/inkwise-rm"
   },
   "dependencies": {
     "@inkwise/core": "0.1.0",

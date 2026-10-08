@@ -201,6 +201,6 @@ const COLOR_NAMES: Record<number, string> = {
 };
 
 /** A plain colour name for a highlight, for tags. Falls back to the hex value. */
-export function highlightColorName(h: Pick<RmHighlight, 'color' | 'rgba'>): string {
+export function highlightColorName(h: { color: number; rgba?: string | null }): string {
   return COLOR_NAMES[h.color] ?? h.rgba ?? `color-${h.color}`;
 }
