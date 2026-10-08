@@ -133,6 +133,8 @@ export class XochitlOutput implements OutputAdapter {
   readonly name = 'device' as const;
   /** True once something was written; xochitl needs a restart to show it. */
   changed = false;
+  /** Filenames core asked to rewrite but that were left alone because they're marked up. */
+  readonly kept = new Set<string>();
   private readonly dir: string;
   private readonly folderName: string;
   private readonly now: () => Date;
@@ -188,7 +190,10 @@ export class XochitlOutput implements OutputAdapter {
     if (existing && (await this.isLive(existing))) {
       // Replacing the book under existing annotations would leave them on the wrong
       // words, so a document the reader has marked up keeps its original EPUB.
-      if ((await this.listDir(join(this.dir, existing))).some((n) => n.endsWith('.rm'))) return;
+      if ((await this.listDir(join(this.dir, existing))).some((n) => n.endsWith('.rm'))) {
+        this.kept.add(filename);
+        return;
+      }
       await this.writeAtomic(`${existing}.epub`, bytes);
       await this.touch(existing);
       this.changed = true;

@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
-import { ReadwiseClient, describeSyncError, syncReader, textManifestStore, type FetchLike } from '@inkwise/core';
+import { ReadwiseClient, describeSyncError, summarize, syncReader, textManifestStore, type FetchLike } from '@inkwise/core';
 import { FakeReadwise } from '@inkwise/core/testing';
 import { sendDeviceHighlights } from './highlightSync.js';
 import { highlightColorName } from './rmHighlights.js';
@@ -123,7 +123,12 @@ async function sync(v: { limit?: string; location?: string; mock?: boolean; 'dry
     { location: v.location ?? 'later', limit, dryRun, showHighlights: false, includeImages: !!imageFetch },
   );
   for (const w of result.warnings) console.log(`  warning: ${w}`);
-  console.log(result.summary);
+  // Reader bumps an article whenever it gets a highlight, so core asks to rebuild it;
+  // books with highlights on the tablet are left as they are (see XochitlOutput.put).
+  const kept = result.items.filter((i) => i.action === 'updated' && output.kept.has(i.filename)).length;
+  let line = summarize({ ...result, updated: result.updated - kept }, dryRun);
+  if (kept) line += ` Left ${kept} marked-up ${kept === 1 ? 'article' : 'articles'} as ${kept === 1 ? 'it is' : 'they are'}.`;
+  console.log(line);
 
   if (output.changed && !dryRun) {
     if (v['no-restart']) console.log('New articles will show up after the reading app restarts.');

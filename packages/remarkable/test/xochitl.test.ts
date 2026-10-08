@@ -95,6 +95,7 @@ describe('XochitlOutput', () => {
     writeFileSync(join(dir, 'xochitl', id, 'page.rm'), fixture('Normal_AB.rm'));
     await out.put(FILE, WIKI);
     expect(readFileSync(join(dir, 'xochitl', `${id}.epub`)).equals(Buffer.from(v2))).toBe(true);
+    expect([...out.kept]).toEqual([FILE]);
   });
 
   it('sends removed books to the trash and archived ones to Inkwise/Archive', async () => {
