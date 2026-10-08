@@ -282,10 +282,10 @@ async function pullHighlights(
   }
   const wanted = new Set(docs.map((d) => d.id));
   const relevant = found.filter((h) => wanted.has(h.parentId));
-  for (const h of relevant) addDocHighlight(manifest, h.parentId, h.text);
+  for (const h of relevant) addDocHighlight(manifest, h.parentId, h.text, { id: h.id, note: h.note });
   if (opts.dryRun) return;
   await updateManifest(deps.manifest, (m) => {
-    for (const h of relevant) addDocHighlight(m, h.parentId, h.text);
+    for (const h of relevant) addDocHighlight(m, h.parentId, h.text, { id: h.id, note: h.note });
     m.highlightsSyncedAt = startedAt;
   });
 }

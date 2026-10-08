@@ -3,8 +3,10 @@ import {
   MemoryManifestStore,
   MemoryOutput,
   ReadwiseClient,
+  addNoteToHighlight,
   archiveDocument,
   buildEpub,
+  deleteHighlight,
   epubFilename,
   epubIdentifier,
   locateInText,
@@ -74,6 +76,53 @@ describe('sendHighlight', () => {
     const r = await sendHighlight({ client, manifest, filePath: path, text: '  Speed is a habit,  not a virtue. ' });
     expect(r.status).toBe('duplicate');
     expect(fake.highlights.length).toBe(1);
+  });
+
+  it('treats re-selecting part of a highlight as editing it', async () => {
+    const { client, manifest, path, doc } = await setup();
+    const sent = await sendHighlight({ client, manifest, filePath: path, text: 'Speed is a habit, not a virtue.', note: 'first' });
+    expect(sent.status).toBe('sent');
+    const again = await sendHighlight({ client, manifest, filePath: path, text: 'a habit, not a virtue' });
+    expect(again.status).toBe('duplicate');
+    expect(again.existing).toMatchObject({ text: 'Speed is a habit, not a virtue.', highlightId: sent.highlightId, note: 'first' });
+    // A short word that happens to sit inside the highlight is a new selection, not an edit.
+    const word = await sendHighlight({ client, manifest, filePath: path, text: 'habit' });
+    expect(word.status).not.toBe('duplicate');
+    expect(manifest.manifest.docHighlights[doc.id]).toContain('Speed is a habit, not a virtue.');
+  });
+
+  it('updates the note and deletes a sent highlight in Readwise', async () => {
+    const { fake, client, manifest, path, doc } = await setup();
+    const text = 'Speed is a habit, not a virtue.';
+    await sendHighlight({ client, manifest, filePath: path, text });
+    const n = await addNoteToHighlight({ client, manifest, docId: doc.id, text, note: 'edited later' });
+    expect(n).toEqual({ ok: true, message: 'Note saved.' });
+    expect(fake.highlights[0]!.notes).toBe('edited later');
+    const d = await deleteHighlight({ client, manifest, docId: doc.id, text });
+    expect(d).toEqual({ ok: true, message: 'Highlight deleted.' });
+    expect(fake.highlights).toHaveLength(0);
+    expect(manifest.manifest.docHighlights[doc.id]).toBeUndefined();
+    // Selecting it again now sends a fresh highlight.
+    expect((await sendHighlight({ client, manifest, filePath: path, text })).status).toBe('sent');
+  });
+
+  it('deletes a queued highlight without touching Readwise', async () => {
+    const { fake, client, manifest, path, doc } = await setup();
+    fake.offline = true;
+    await sendHighlight({ client, manifest, filePath: path, text: 'None of this is new.' });
+    const d = await deleteHighlight({ client, manifest, docId: doc.id, text: 'None of this is new.' });
+    expect(d.ok).toBe(true);
+    expect(manifest.manifest.pendingHighlights).toHaveLength(0);
+  });
+
+  it('keeps the highlight when a delete fails offline', async () => {
+    const { fake, client, manifest, path, doc } = await setup();
+    const text = 'Speed is a habit, not a virtue.';
+    await sendHighlight({ client, manifest, filePath: path, text });
+    fake.offline = true;
+    const d = await deleteHighlight({ client, manifest, docId: doc.id, text });
+    expect(d.ok).toBe(false);
+    expect(manifest.manifest.docHighlights[doc.id]).toContain(text);
   });
 
   it('queues offline and sends on the next sync, never losing the highlight', async () => {

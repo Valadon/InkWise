@@ -60,6 +60,7 @@ export interface ReaderHighlight {
   id: string;
   parentId: string;
   text: string;
+  note: string;
   updatedAt: string;
 }
 
@@ -152,7 +153,13 @@ export class ReadwiseClient {
       const page = (await res.json()) as ListResponse;
       for (const item of page.results ?? []) {
         if (item.parent_id && typeof item.content === 'string' && item.content.trim()) {
-          out.push({ id: item.id, parentId: item.parent_id, text: item.content, updatedAt: item.updated_at });
+          out.push({
+            id: item.id,
+            parentId: item.parent_id,
+            text: item.content,
+            note: typeof item.notes === 'string' ? item.notes : '',
+            updatedAt: item.updated_at,
+          });
         }
       }
       cursor = page.nextPageCursor ?? null;
@@ -224,6 +231,11 @@ export class ReadwiseClient {
   /** Move a Reader document to a location (Inkwise uses `archive`). */
   async moveDocument(id: string, location: string): Promise<void> {
     await this.request('PATCH', `/api/v3/update/${encodeURIComponent(id)}/`, { location });
+  }
+
+  /** Delete a Reader item. Highlights are items too, so this deletes highlights. */
+  async deleteDocument(id: string): Promise<void> {
+    await this.request('DELETE', `/api/v3/delete/${encodeURIComponent(id)}/`);
   }
 
   async archive(id: string): Promise<void> {

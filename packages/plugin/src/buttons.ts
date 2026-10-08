@@ -42,13 +42,15 @@ export class ScreenStore {
   /** The same button reported twice within this window counts as one tap. */
   static readonly DOUBLE_TAP_MS = 2000;
 
-  set(screen: Screen, now = Date.now()) {
+  /** Returns false when the press was a repeat of the last one and was ignored. */
+  set(screen: Screen, now = Date.now()): boolean {
     const repeat = screen === this.lastPress.screen && now - this.lastPress.at < ScreenStore.DOUBLE_TAP_MS;
     this.lastPress = { screen, at: now };
-    if (repeat && screen !== 'settings') return;
+    if (repeat && screen !== 'settings') return false;
     this.current = screen;
     this.seq++;
     for (const l of this.listeners) l(screen);
+    return true;
   }
 
   subscribe(l: Listener) {

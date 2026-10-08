@@ -7,6 +7,7 @@ import { FakeReadwise, TINY_PNG } from '@inkwise/core/testing';
 import { InkwiseApp, STORAGE_ROOT, TOKEN_IMPORT_PATH, cleanToken, type Host, type Permission } from '../src/services/app';
 import { base64ToBytes, bytesToBase64 } from '../src/services/base64';
 import { MemoryFs } from '../src/services/fs';
+import { HighlightState, needsScreen, quickSend } from '../src/services/quickSend';
 
 const FIXTURES = join(__dirname, '..', '..', '..', 'fixtures', 'documents');
 const docs: ReaderDocument[] = readdirSync(FIXTURES)
@@ -188,7 +189,7 @@ describe('Send highlight', () => {
     host.selection = 'Speed is a habit, not a virtue.';
     const r = await app.sendSelection();
     const n = await app.addNote({ docId: r.docId!, text: r.selection!, note: 'so true', highlightId: r.highlightId });
-    expect(n).toEqual({ ok: true, message: 'Note added.' });
+    expect(n).toEqual({ ok: true, message: 'Note saved.' });
     expect(fake.highlights[0]!.notes).toBe('so true');
   });
 
@@ -216,6 +217,46 @@ describe('Send highlight', () => {
     expect(article).toContain('<span class="rw-hl">None of this is new.</span>');
     // The next sync sees the file already shows it and leaves it alone.
     expect(await app.sync(() => {})).toBe('Synced 0 new, 0 updated.');
+  });
+
+  it('quick send stays silent when the highlight is sent and shaded', async () => {
+    host.filePath = `${LIBRARY}/${epubFilename(longform)}`;
+    host.selection = 'None of this is new.';
+    const ui = { shown: 0, closed: 0, show() { this.shown++; }, close() { this.closed++; } };
+    const state = new HighlightState();
+    const r = await quickSend(app, ui, state);
+    expect(r?.status).toBe('sent');
+    expect(ui).toMatchObject({ shown: 0, closed: 1 });
+
+    // Selecting it again opens the screen to edit or delete it.
+    host.selection = 'None of this is new';
+    const again = await quickSend(app, ui, state);
+    expect(again?.status).toBe('duplicate');
+    expect(again?.existing?.text).toBe('None of this is new.');
+    expect(ui.shown).toBe(1);
+  });
+
+  it('quick send opens the screen when something needs the user', () => {
+    expect(needsScreen({ status: 'needs_attention', message: '' })).toBe(true);
+    expect(needsScreen({ status: 'token_rejected', message: '' })).toBe(true);
+    expect(needsScreen({ status: 'sent', message: '', shading: undefined })).toBe(true);
+    expect(needsScreen({ status: 'sent', message: '', shading: 'Shaded on the page.' })).toBe(false);
+    expect(needsScreen({ status: 'queued_offline', message: '', shading: 'Shaded on the page.' })).toBe(false);
+  });
+
+  it('deleting a highlight removes it in Readwise and clears its shading', async () => {
+    const path = `${LIBRARY}/${epubFilename(longform)}`;
+    host.filePath = path;
+    host.selection = 'None of this is new.';
+    const sent = await app.sendSelection();
+    expect(fake.highlights).toHaveLength(1);
+    const r = await app.deleteHighlight(sent.docId!, 'None of this is new.');
+    expect(r).toEqual({ ok: true, message: 'Highlight deleted.' });
+    expect(fake.highlights).toHaveLength(0);
+    const article = strFromU8(unzipSync(await fs.readBytes(path))['OEBPS/article.xhtml']!);
+    expect(article).not.toContain('rw-hl"');
+    expect(article).toContain('None of this is new.');
+    expect(host.reloads).toBe(2);
   });
 
   it('leaves the file alone when shading is off', async () => {
@@ -273,24 +314,40 @@ describe('Done', () => {
     host.filePath = `${LIBRARY}/${epubFilename(longform)}`;
   });
 
-  it('archives in Reader and moves the EPUB to Archive by default', async () => {
+  it('archives in Reader, leaves the open file alone, and moves it on the next sync', async () => {
+    const path = `${LIBRARY}/${epubFilename(longform)}`;
+    await fs.writeText(`${path}.mark`, 'handwriting');
     const r = await app.done();
-    expect(r).toEqual({ ok: true, message: 'Archived in Reader. Moved to Inkwise/Archive.' });
+    expect(r).toEqual({ ok: true, message: 'Archived in Reader. It moves to Inkwise/Archive on your next sync.' });
     expect(fake.documents.find((d) => d.id === longform.id)!.location).toBe('archive');
+    expect(await fs.exists(path)).toBe(true);
+
+    // Still open: a sync doesn't pull it out from under the reader.
+    expect(await app.sync(() => {})).toBe('Synced 0 new, 0 updated.');
+    expect(await fs.exists(path)).toBe(true);
+
+    host.filePath = null;
+    expect(await app.sync(() => {})).toBe('Synced 0 new, 0 updated. Moved 1 finished article to Archive.');
+    expect(await fs.exists(path)).toBe(false);
     expect(await fs.exists(`${LIBRARY}/Archive/${epubFilename(longform)}`)).toBe(true);
-    expect(await fs.exists(`${LIBRARY}/${epubFilename(longform)}`)).toBe(false);
+    expect(await fs.readText(`${LIBRARY}/Archive/${epubFilename(longform)}.mark`)).toBe('handwriting');
   });
 
   it('can keep or delete the file instead', async () => {
     await app.saveSettings({ afterArchive: 'keep' });
     expect((await app.done()).message).toBe('Archived in Reader.');
+    host.filePath = null;
+    await app.sync(() => {});
     expect(await fs.exists(`${LIBRARY}/${epubFilename(longform)}`)).toBe(true);
 
     const other = docs.find((d) => d.id.includes('messy'))!;
-    host.filePath = `${LIBRARY}/${epubFilename(other)}`;
+    const otherPath = `${LIBRARY}/${epubFilename(other)}`;
+    host.filePath = otherPath;
     await app.saveSettings({ afterArchive: 'delete' });
-    expect((await app.done()).message).toBe('Archived in Reader. Removed from the device.');
-    expect(await fs.exists(host.filePath)).toBe(false);
+    expect((await app.done()).message).toBe('Archived in Reader. It is removed from the device on your next sync.');
+    host.filePath = null;
+    expect(await app.sync(() => {})).toContain('Removed 2 finished articles.');
+    expect(await fs.exists(otherPath)).toBe(false);
     expect(host.granted.has('plugin.permission.FILE:DELETE')).toBe(true);
   });
 

@@ -98,7 +98,7 @@ export function SettingsScreen({ app, onClose }: { app: InkwiseApp; onClose: () 
 
       <Section title="When you tap Done">
         <Choice
-          label="After archiving in Reader"
+          label="After archiving in Reader (happens on your next sync)"
           value={settings.afterArchive}
           options={[
             { value: 'move', label: 'Move to Archive folder' },

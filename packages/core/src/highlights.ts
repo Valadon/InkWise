@@ -1,6 +1,6 @@
 import { Parser } from 'htmlparser2';
 import { idFromFilename } from './epub.js';
-import { addDocHighlight, docIdForFilename, withManifestLock, type Manifest, type ManifestStore, type PendingHighlight } from './manifest.js';
+import { addDocHighlight, docIdForFilename, removeDocHighlight, withManifestLock, type Manifest, type ManifestStore, type PendingHighlight } from './manifest.js';
 import { highlightHash, highlightVariants, normalizeSelection, straighten } from './normalize.js';
 import { NetworkError, ReadwiseClient, ReadwiseError } from './readwise.js';
 
@@ -22,6 +22,16 @@ export interface SendResult {
   sentText?: string;
   /** Reader id of the new highlight (lets the UI attach a note afterwards). */
   highlightId?: string;
+  /** For `duplicate`: the highlight the selection belongs to, so the UI can edit or delete it. */
+  existing?: ExistingHighlight;
+}
+
+export interface ExistingHighlight {
+  text: string;
+  highlightId?: string;
+  note?: string;
+  /** Still waiting to send (offline). */
+  queued?: boolean;
 }
 
 export interface SendHighlightInput {
@@ -78,8 +88,14 @@ async function sendHighlightUnlocked(input: SendHighlightInput): Promise<SendRes
   if (!docId) return { status: 'not_inkwise', message: "This document isn't from Readwise." };
 
   const hash = highlightHash(docId, text);
-  if (manifest.sentHighlightHashes.includes(hash)) {
-    return { status: 'duplicate', message: 'Already sent this highlight.', docId };
+  const existing = findExistingHighlight(manifest, docId, text);
+  if (existing || manifest.sentHighlightHashes.includes(hash)) {
+    return {
+      status: 'duplicate',
+      message: 'Already highlighted.',
+      docId,
+      existing: existing ?? describeHighlight(manifest, docId, text),
+    };
   }
   const already = manifest.pendingHighlights.find((p) => p.docId === docId && highlightHash(p.docId, p.text) === hash);
   if (already) {
@@ -180,7 +196,7 @@ async function finish(
   switch (outcome.kind) {
     case 'sent':
       manifest.sentHighlightHashes.push(hash);
-      addDocHighlight(manifest, p.docId, outcome.sentText ?? p.text);
+      addDocHighlight(manifest, p.docId, outcome.sentText ?? p.text, { id: outcome.highlightId, note: p.note });
       await store.save(manifest);
       return {
         status: 'sent',
@@ -193,7 +209,7 @@ async function finish(
     case 'retryable':
       p.lastError = outcome.error;
       manifest.pendingHighlights.push(p);
-      addDocHighlight(manifest, p.docId, p.text);
+      addDocHighlight(manifest, p.docId, p.text, { note: p.note });
       await store.save(manifest);
       return { status: 'queued_offline', message: 'Saved offline, will send on next sync.', docId: p.docId };
     case 'auth':
@@ -241,17 +257,88 @@ async function addNoteToHighlightUnlocked(opts: {
   const queued = manifest.pendingHighlights.find((p) => p.docId === opts.docId && highlightHash(p.docId, p.text) === hash);
   if (queued) {
     queued.note = note;
+    addDocHighlight(manifest, opts.docId, opts.text, { note });
     await opts.manifest.save(manifest);
     return { ok: true, message: 'Note saved; it will go with the highlight.' };
   }
-  if (!opts.highlightId) return { ok: false, message: "Couldn't find that highlight to attach a note." };
+  const highlightId = opts.highlightId ?? manifest.highlightInfo[hash]?.id;
+  if (!highlightId) return { ok: false, message: "Couldn't find that highlight to attach a note." };
   try {
-    await opts.client.updateHighlightNotes(opts.highlightId, note);
-    return { ok: true, message: 'Note added.' };
+    await opts.client.updateHighlightNotes(highlightId, note);
+    addDocHighlight(manifest, opts.docId, opts.text, { id: highlightId, note });
+    await opts.manifest.save(manifest);
+    return { ok: true, message: 'Note saved.' };
   } catch (err) {
     if (err instanceof NetworkError) return { ok: false, message: 'No connection. The highlight is saved; add the note in Reader later.' };
     return { ok: false, message: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/**
+ * The highlight a selection belongs to, if the user selected (most of) a
+ * passage that's already highlighted. Re-selecting is how a highlight gets
+ * edited or deleted, since plugins can't react to taps on the page.
+ */
+export function findExistingHighlight(manifest: Manifest, docId: string, selection: string): ExistingHighlight | null {
+  const sel = normalizeSelection(selection);
+  const selLen = foldForMatch(sel).text.length;
+  if (!selLen) return null;
+  for (const h of manifest.docHighlights[docId] ?? []) {
+    const hLen = foldForMatch(h).text.length;
+    // The selection sits inside the highlight (a partial re-select)...
+    const inside = findLoose(sel, h) && (selLen >= 15 || selLen >= hLen / 2);
+    // ...or covers it without running much past it.
+    const covers = findLoose(h, sel) && hLen >= selLen / 1.5;
+    if (inside || covers) return describeHighlight(manifest, docId, h);
+  }
+  return null;
+}
+
+function describeHighlight(manifest: Manifest, docId: string, text: string): ExistingHighlight {
+  const key = highlightHash(docId, text);
+  const info = manifest.highlightInfo[key] ?? {};
+  const queued = manifest.pendingHighlights.find((p) => p.docId === docId && highlightHash(p.docId, p.text) === key);
+  return { text, highlightId: info.id, note: queued?.note || info.note, queued: !!queued };
+}
+
+export function deleteHighlight(opts: Parameters<typeof deleteHighlightUnlocked>[0]): ReturnType<typeof deleteHighlightUnlocked> {
+  return withManifestLock(() => deleteHighlightUnlocked(opts));
+}
+
+/** Delete a highlight in Readwise (or drop it from the offline queue) and forget it locally. */
+async function deleteHighlightUnlocked(opts: {
+  client: ReadwiseClient;
+  manifest: ManifestStore;
+  docId: string;
+  text: string;
+}): Promise<{ ok: boolean; message: string }> {
+  const manifest = await opts.manifest.load();
+  const key = highlightHash(opts.docId, opts.text);
+  const queuedIndex = manifest.pendingHighlights.findIndex((p) => p.docId === opts.docId && highlightHash(p.docId, p.text) === key);
+  if (queuedIndex >= 0) {
+    manifest.pendingHighlights.splice(queuedIndex, 1);
+    removeDocHighlight(manifest, opts.docId, opts.text);
+    await opts.manifest.save(manifest);
+    return { ok: true, message: 'Highlight deleted.' };
+  }
+  const id = manifest.highlightInfo[key]?.id;
+  if (!id) {
+    removeDocHighlight(manifest, opts.docId, opts.text);
+    await opts.manifest.save(manifest);
+    return { ok: true, message: "Removed from this page. Inkwise doesn't know its Readwise id, so delete it in Reader too." };
+  }
+  try {
+    await opts.client.deleteDocument(id);
+  } catch (err) {
+    if (err instanceof NetworkError) return { ok: false, message: 'No connection. Try deleting again when you are online.' };
+    if (!(err instanceof ReadwiseError && err.status === 404)) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+    }
+    // Already gone in Readwise: just forget it here.
+  }
+  removeDocHighlight(manifest, opts.docId, opts.text);
+  await opts.manifest.save(manifest);
+  return { ok: true, message: 'Highlight deleted.' };
 }
 
 export interface FlushResult {
@@ -286,7 +373,7 @@ export async function flushPending(opts: {
     const hash = highlightHash(p.docId, p.text);
     if (outcome.kind === 'sent') {
       if (!manifest.sentHighlightHashes.includes(hash)) manifest.sentHighlightHashes.push(hash);
-      addDocHighlight(manifest, p.docId, outcome.sentText);
+      addDocHighlight(manifest, p.docId, outcome.sentText, { id: outcome.highlightId, note: p.note });
       result.sent++;
       continue;
     }

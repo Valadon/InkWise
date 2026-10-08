@@ -6,7 +6,10 @@ import { AppRegistry, Image } from 'react-native';
 import { PluginManager } from 'sn-plugin-lib';
 import App from './App';
 import { name as appName } from './app.json';
+import { app } from './src/appInstance';
 import { BUTTON, screenForButton, screens } from './src/buttons';
+import { closeView } from './src/host';
+import { quickSend } from './src/services/quickSend';
 
 AppRegistry.registerComponent(appName, () => App);
 
@@ -30,12 +33,14 @@ PluginManager.registerButton(1, ['DOC'], {
   showType: 1,
 });
 
-// Text-selection toolbar in DOC: send the selection to Readwise.
+// Text-selection toolbar in DOC: send the selection to Readwise. No popup
+// (showType 0): the passage gets shaded and the view only opens when there's
+// something to show, such as an unmatched highlight or one being edited.
 PluginManager.registerButton(3, ['DOC'], {
   id: BUTTON.SEND_HIGHLIGHT,
   name: 'Send highlight',
   icon: icon(require('./assets/highlight.png')),
-  showType: 1,
+  showType: 0,
 });
 
 PluginManager.registerConfigButton();
@@ -43,7 +48,11 @@ PluginManager.registerConfigButton();
 PluginManager.registerButtonListener({
   onButtonPress(event) {
     const screen = screenForButton(event.id);
-    if (screen) screens.set(screen);
+    if (!screen) return;
+    const counted = screens.set(screen);
+    if (screen === 'highlight' && counted) {
+      quickSend(app, { show: () => PluginManager.showPluginView(), close: closeView });
+    }
   },
 });
 

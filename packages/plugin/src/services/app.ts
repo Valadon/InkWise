@@ -2,6 +2,7 @@ import {
   ReadwiseClient,
   addNoteToHighlight,
   archiveDocument,
+  deleteHighlight,
   describeSyncError,
   epubIdentifier,
   flushPending,
@@ -78,6 +79,12 @@ export const STORAGE_ROOT = '/storage/emulated/0';
 export const TOKEN_IMPORT_PATH = `${STORAGE_ROOT}/MyStyle/Inkwise/token.txt`;
 
 export class PermissionError extends Error {}
+
+/** What a successful shade reports; quick send stays silent when it sees this. */
+export const SHADED = 'Shaded on the page.';
+
+/** The Supernote keeps a document's handwriting in a sidecar file next to it. */
+export const markSidecar = (path: string) => `${path}.mark`;
 
 /**
  * Everything the three buttons and the settings page do, independent of React.
@@ -252,7 +259,10 @@ export class InkwiseApp {
           showHighlights: settings.showHighlights,
         },
       );
-      return result.summary;
+      const tidied = await this.tidyArchived();
+      if (!tidied) return result.summary;
+      const verb = (await this.settings()).afterArchive === 'delete' ? 'Removed' : 'Moved';
+      return `${result.summary} ${verb} ${tidied} finished ${tidied === 1 ? 'article' : 'articles'}${verb === 'Moved' ? ' to Archive' : ''}.`;
     } catch (err) {
       return describeSyncError(err);
     }
@@ -297,12 +307,13 @@ export class InkwiseApp {
    * a sent highlight visible. Returns a line for the screen, or undefined when
    * shading is off or doesn't apply.
    */
-  async shadeOpenFile(filePath: string, docId: string): Promise<string | undefined> {
+  async shadeOpenFile(filePath: string, docId: string, force = false): Promise<string | undefined> {
     if (!/\.epub$/i.test(filePath) || !(await this.settings()).showHighlights) return undefined;
     try {
       const store = await this.manifest();
       const texts = (await store.load()).docHighlights[docId] ?? [];
-      if (!texts.length) return undefined;
+      // `force` rewrites even with nothing to shade, to clear a deleted highlight.
+      if (!texts.length && !force) return undefined;
       await this.ensure('plugin.permission.FILE:WRITE');
       const r = markEpub(await this.fs.readBytes(filePath), texts);
       if (!r) return "Couldn't shade it on the page: the file isn't a readable EPUB.";
@@ -315,7 +326,7 @@ export class InkwiseApp {
         if (d && d.filename === name) d.marked = highlightsKey(texts);
       });
       await this.host.reloadFile();
-      return r.marked ? 'Shaded on the page.' : "Couldn't find the passage on the page to shade it.";
+      return r.marked || !texts.length ? SHADED : "Couldn't find the passage on the page to shade it.";
     } catch (err) {
       return `Couldn't shade it on the page: ${err instanceof Error ? err.message : String(err)}`;
     }
@@ -323,6 +334,22 @@ export class InkwiseApp {
 
   async addNote(args: { docId: string; text: string; note: string; highlightId?: string }) {
     return addNoteToHighlight({ client: await this.client(), manifest: await this.manifest(), ...args });
+  }
+
+  /** Delete a highlight in Readwise and clear its shading from the open article. */
+  async deleteHighlight(docId: string, text: string): Promise<{ ok: boolean; message: string }> {
+    let client: ReadwiseClient;
+    try {
+      client = await this.client();
+    } catch (err) {
+      return { ok: false, message: (err as Error).message };
+    }
+    const r = await deleteHighlight({ client, manifest: await this.manifest(), docId, text });
+    if (r.ok) {
+      const path = await this.host.currentFilePath();
+      if (path) await this.shadeOpenFile(path, docId, true);
+    }
+    return r;
   }
 
   /** Done button: flush highlights, archive in Reader, then tidy the local file. */
@@ -344,30 +371,54 @@ export class InkwiseApp {
       return { ok: false, message: (err as Error).message };
     }
     const r = await archiveDocument({ client, manifest, filePath, readIdentifier: (p) => this.readIdentifier(p) });
-    if (r.status !== 'archived') return { ok: r.status === 'queued_offline', message: r.message };
-    const tidy = await this.afterArchive(filePath);
-    return { ok: true, message: tidy ? `${r.message} ${tidy}` : r.message };
+    if (r.status !== 'archived' && r.status !== 'queued_offline') return { ok: false, message: r.message };
+    // The article is still open in the DOC app, so leave the file alone: moving
+    // it now pulls it out from under the reader ("MARK file cannot be found").
+    // The next sync tidies it.
+    const { afterArchive } = await this.settings();
+    const later =
+      r.status !== 'archived'
+        ? ''
+        : afterArchive === 'move'
+        ? ' It moves to Inkwise/Archive on your next sync.'
+        : afterArchive === 'delete'
+          ? ' It is removed from the device on your next sync.'
+          : '';
+    return { ok: true, message: `${r.message}${later}` };
   }
 
-  private async afterArchive(filePath: string): Promise<string> {
+  /**
+   * Move (or delete) EPUBs archived with Done, along with their handwriting
+   * file, skipping whatever is open right now. Runs at the end of each sync.
+   */
+  async tidyArchived(): Promise<number> {
     const { afterArchive } = await this.settings();
+    if (afterArchive === 'keep') return 0;
     const library = await this.libraryDir();
-    // Only touch files Inkwise itself manages.
-    if (afterArchive === 'keep' || !filePath.startsWith(`${library}/`)) return '';
-    const name = filePath.slice(library.length + 1);
-    try {
-      if (afterArchive === 'move') {
-        await this.ensure('plugin.permission.FILE:WRITE');
-        await this.fs.mkdir(joinPath(library, 'Archive'));
-        await this.fs.move(filePath, joinPath(library, 'Archive', name));
-        return 'Moved to Inkwise/Archive.';
+    const open = await this.host.currentFilePath().catch(() => null);
+    const m = await (await this.manifest()).load();
+    let tidied = 0;
+    for (const d of Object.values(m.documents)) {
+      if (d.status !== 'archived') continue;
+      const path = joinPath(library, d.filename);
+      if (path === open || !(await this.fs.exists(path))) continue;
+      try {
+        if (afterArchive === 'move') {
+          const dir = joinPath(library, 'Archive');
+          await this.fs.mkdir(dir);
+          await this.fs.move(path, joinPath(dir, d.filename));
+          if (await this.fs.exists(markSidecar(path))) await this.fs.move(markSidecar(path), markSidecar(joinPath(dir, d.filename)));
+        } else {
+          await this.ensure('plugin.permission.FILE:DELETE');
+          await this.fs.unlink(path);
+          // The handwriting file stays: deleting someone's notes is never worth the risk.
+        }
+        tidied++;
+      } catch {
+        // Leave it for the next sync.
       }
-      await this.ensure('plugin.permission.FILE:DELETE');
-      await this.fs.unlink(filePath);
-      return 'Removed from the device.';
-    } catch {
-      return 'The file stayed where it was.';
     }
+    return tidied;
   }
 
   /** Highlights waiting to send or needing review (for the settings page). */
@@ -424,7 +475,10 @@ export class InkwiseApp {
       },
       async moveToSubfolder(filename, subfolder) {
         await fs.mkdir(joinPath(dir, subfolder));
-        await fs.move(joinPath(dir, filename), joinPath(dir, subfolder, filename));
+        const from = joinPath(dir, filename);
+        const to = joinPath(dir, subfolder, filename);
+        await fs.move(from, to);
+        if (await fs.exists(markSidecar(from))) await fs.move(markSidecar(from), markSidecar(to));
       },
     };
   }

@@ -111,6 +111,15 @@ export class FakeReadwise {
       doc.updated_at = new Date().toISOString();
       return respond(200, { id: doc.id, url: doc.url });
     }
+    const del = /^\/api\/v3\/delete\/([^/]+)\/$/.exec(path);
+    if (method === 'DELETE' && del) {
+      const targetId = decodeURIComponent(del[1]!);
+      const before = this.highlights.length + this.documents.length;
+      this.highlights = this.highlights.filter((h) => h.id !== targetId);
+      this.documents = this.documents.filter((d) => d.id !== targetId);
+      if (this.highlights.length + this.documents.length === before) return respond(404, { detail: 'Not found.' });
+      return respond(204, '');
+    }
     return respond(404, { detail: 'Not found.' });
   };
 

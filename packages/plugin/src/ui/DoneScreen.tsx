@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { InkwiseApp } from '../services/app';
-import { Line, Page, Section } from './kit';
+import { Button, Line, Page, Row, Section } from './kit';
 import { usePressAction } from './usePress';
 
 export function DoneScreen({ app, run, onClose }: { app: InkwiseApp; run: number; onClose: () => void }) {
@@ -19,6 +19,11 @@ export function DoneScreen({ app, run, onClose }: { app: InkwiseApp; run: number
       <Section>
         <Line strong>{message ?? 'Archiving in Reader…'}</Line>
       </Section>
+      {message ? (
+        <Row>
+          <Button label="Back to reading" primary onPress={onClose} />
+        </Row>
+      ) : null}
     </Page>
   );
 }

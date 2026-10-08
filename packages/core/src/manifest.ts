@@ -1,3 +1,5 @@
+import { highlightHash } from './normalize.js';
+
 /**
  * Local state: which Reader documents are on the device, plus queued highlights
  * and archive requests that haven't reached Readwise yet. The Readwise token is
@@ -50,6 +52,13 @@ export interface Manifest {
   docHighlights: Record<string, string[]>;
   /** When Readwise highlights were last fetched. */
   highlightsSyncedAt: string | null;
+  /** Readwise id and note per highlight, keyed by `highlightHash(docId, text)`. */
+  highlightInfo: Record<string, HighlightInfo>;
+}
+
+export interface HighlightInfo {
+  id?: string;
+  note?: string;
 }
 
 export interface ManifestStore {
@@ -67,6 +76,7 @@ export function emptyManifest(): Manifest {
     pendingArchives: [],
     docHighlights: {},
     highlightsSyncedAt: null,
+    highlightInfo: {},
   };
 }
 
@@ -75,14 +85,28 @@ export function highlightsKey(texts: string[] | undefined): string {
   return [...new Set((texts ?? []).map((t) => t.trim()).filter(Boolean))].sort().join('\u0000');
 }
 
-/** Record a highlight's text for a document. Returns true if it was new. */
-export function addDocHighlight(m: Manifest, docId: string, text: string): boolean {
+/** Record a highlight's text (and what we know about it) for a document. Returns true if the text was new. */
+export function addDocHighlight(m: Manifest, docId: string, text: string, info: HighlightInfo = {}): boolean {
   const t = text.trim();
   if (!t) return false;
+  const key = highlightHash(docId, t);
+  const known = (m.highlightInfo[key] ??= {});
+  if (info.id) known.id = info.id;
+  if (info.note !== undefined && info.note !== '') known.note = info.note;
   const list = (m.docHighlights[docId] ??= []);
   if (list.includes(t)) return false;
   list.push(t);
   return true;
+}
+
+/** Forget a highlight locally (its text, id, note and sent marker). */
+export function removeDocHighlight(m: Manifest, docId: string, text: string): void {
+  const t = text.trim();
+  m.docHighlights[docId] = (m.docHighlights[docId] ?? []).filter((x) => x !== t);
+  if (!m.docHighlights[docId]!.length) delete m.docHighlights[docId];
+  const key = highlightHash(docId, t);
+  delete m.highlightInfo[key];
+  m.sentHighlightHashes = m.sentHighlightHashes.filter((h) => h !== key);
 }
 
 /** Parse a stored manifest, tolerating missing fields and garbage (a corrupt file must not block sync). */
@@ -146,6 +170,16 @@ export function parseManifest(json: string | null | undefined): Manifest {
     }
   }
   m.highlightsSyncedAt = typeof raw.highlightsSyncedAt === 'string' ? raw.highlightsSyncedAt : null;
+  if (raw.highlightInfo && typeof raw.highlightInfo === 'object') {
+    for (const [k, v] of Object.entries<any>(raw.highlightInfo)) {
+      if (v && typeof v === 'object') {
+        m.highlightInfo[k] = {
+          id: typeof v.id === 'string' ? v.id : undefined,
+          note: typeof v.note === 'string' ? v.note : undefined,
+        };
+      }
+    }
+  }
   return m;
 }
 

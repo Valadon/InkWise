@@ -1,49 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import type { FetchLike } from '@inkwise/core';
+import React, { useEffect, useState } from 'react';
+import { app } from './src/appInstance';
 import { screens, type Screen } from './src/buttons';
-import { closeView, supernoteHost } from './src/host';
-import { InkwiseApp } from './src/services/app';
-import { joinPath } from './src/services/fs';
-import { makeImageFetch, rnfs } from './src/services/rnfs';
+import { closeView } from './src/host';
 import { DoneScreen } from './src/ui/DoneScreen';
 import { HighlightScreen } from './src/ui/HighlightScreen';
 import { SettingsScreen } from './src/ui/SettingsScreen';
 import { SyncScreen } from './src/ui/SyncScreen';
 
-const REQUEST_TIMEOUT_MS = 30_000;
-
-/**
- * fetch with a timeout. A stalled connection would otherwise leave "Sending…" on
- * screen forever. Timing out throws a TypeError, the same as a dropped
- * connection, so the highlight gets queued for later.
- */
-const jsonFetch: FetchLike = (url, init) => {
-  const controller = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      controller.abort();
-      reject(new TypeError('Network request timed out'));
-    }, REQUEST_TIMEOUT_MS);
-  });
-  const request = fetch(url, { ...init, signal: controller.signal }).catch((err: unknown) => {
-    throw err instanceof TypeError ? err : new TypeError(String(err));
-  });
-  return Promise.race([request, timeout]).finally(() => timer !== undefined && clearTimeout(timer)) as unknown as ReturnType<FetchLike>;
-};
-
-function createApp() {
-  const app: InkwiseApp = new InkwiseApp(
-    supernoteHost,
-    rnfs,
-    jsonFetch,
-    makeImageFetch(rnfs, async () => joinPath(await app.privateDir(), 'tmp')),
-  );
-  return app;
-}
-
 export default function App() {
-  const app = useMemo(createApp, []);
   const [screen, setScreen] = useState<Screen>(screens.screen);
   const [run, setRun] = useState(screens.pressCount);
 
@@ -60,7 +24,7 @@ export default function App() {
 
   switch (screen) {
     case 'highlight':
-      return <HighlightScreen app={app} run={run} onClose={closeView} onSettings={openSettings} />;
+      return <HighlightScreen app={app} onClose={closeView} onSettings={openSettings} />;
     case 'done':
       return <DoneScreen app={app} run={run} onClose={closeView} />;
     case 'settings':

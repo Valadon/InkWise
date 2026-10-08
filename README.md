@@ -28,8 +28,10 @@ You need firmware with the plugin beta (Chauvet 3.29.4x on Manta and Nomad).
 ### Use
 
 - **Sync Reader** (sidebar, NOTE and DOC): fetches your Later queue and writes EPUBs to `Document/Inkwise/`. Each one is named `Title__<readwise-id>.epub`.
-- **Send highlight** (DOC text-selection toolbar): sends the selected text as a highlight on the matching Reader document. You can add a note afterwards. With no connection, it's saved and sent on the next sync. The passage is then shaded in the EPUB, because plugins can't draw a highlight on a DOC page. Highlights you make in Reader elsewhere get shaded on the next sync.
-- **Done** (DOC sidebar): sends any queued highlights for the article, archives it in Reader, then moves the EPUB to `Document/Inkwise/Archive/` (or keeps or deletes it; that's a setting).
+- **Send highlight** (DOC text-selection toolbar): sends the selected text as a highlight on the matching Reader document and shades the passage in the EPUB, with no popup, so you keep reading. Plugins can't draw a highlight on a DOC page, so the shading lives in the EPUB itself and reflows with any font size or margin. With no connection, the highlight is saved and sent on the next sync. A screen only opens when something needs you, such as text Readwise couldn't match.
+- **Editing a highlight:** select a shaded passage again and tap **Send highlight**. Instead of sending it twice, Inkwise opens it so you can add a note or delete it (in Readwise too).
+- **Done** (DOC sidebar): sends any queued highlights for the article and archives it in Reader. The open file stays put; the next sync moves it to `Document/Inkwise/Archive/` with its handwriting file (or keeps or deletes it; that's a setting).
+- Highlights you make in Reader elsewhere get shaded on the next sync.
 - **Settings**: Reader location (Later, Shortlist, Inbox), tag filter, article limit, images on or off, shading highlights on or off, folder name, what Done does with the file, and a queue of highlights waiting to send or needing a fix.
 
 ### Permissions
