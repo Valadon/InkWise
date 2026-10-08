@@ -6,6 +6,7 @@ import { parseArgs } from 'node:util';
 import { ReadwiseClient, describeSyncError, summarize, syncReader, textManifestStore, type FetchLike } from '@inkwise/core';
 import { FakeReadwise } from '@inkwise/core/testing';
 import { sendDeviceHighlights } from './highlightSync.js';
+import { Librarian } from './librarian.js';
 import { highlightColorName } from './rmHighlights.js';
 import { SAMPLE_DOCUMENT } from './sample.js';
 import { XOCHITL_DIR, XochitlOutput } from './xochitl.js';
@@ -25,7 +26,11 @@ Sync options:
   --location <loc>  Reader location: later (default), shortlist, new
   --mock            Use a built-in test article and a pretend Readwise (no token needed)
   --dry-run         Show what would happen; change nothing
-  --no-restart      Don't restart the reading app afterwards (new articles show up after the next restart)
+  --no-restart      Never restart the reading app (only matters without librarian;
+                    new articles then show up after the next restart)
+
+With the librarian extension installed (reManager: librarian), new articles
+show up straight away. Without it, InkWise restarts the reading app.
 
 Files: settings in ${'$'}INKWISE_DIR (default /home/root/.local/share/inkwise),
 library in ${'$'}XOCHITL_DIR (default ${XOCHITL_DIR}).`;
@@ -58,7 +63,8 @@ async function writeText(path: string, text: string) {
 
 const realFetch: FetchLike = (url, init) => fetch(url, init as RequestInit) as any;
 
-async function setup(mock: boolean) {
+/** `link`: look for librarian (a quick probe of the reading app). */
+async function setup(mock: boolean, link = true) {
   const p = paths(mock);
   let client: ReadwiseClient;
   let imageFetch: FetchLike | undefined = realFetch;
@@ -72,9 +78,12 @@ async function setup(mock: boolean) {
     client = new ReadwiseClient({ token, fetch: realFetch, onRateLimit: (s) => console.log(`Readwise asked us to wait ${s}s…`) });
   }
   const manifest = textManifestStore({ read: () => readText(p.manifest), write: (t) => writeText(p.manifest, t) });
-  const output = new XochitlOutput({ dir: library(), stateFile: p.library });
-  return { client, manifest, output, imageFetch };
+  const librarian = link ? await Librarian.connect() : null;
+  const output = new XochitlOutput({ dir: library(), stateFile: p.library, library: librarian });
+  return { client, manifest, output, imageFetch, librarian };
 }
+
+const LIBRARIAN_TIP = 'Tip: install "librarian" in reManager and InkWise won\'t need to restart the reading app.';
 
 async function connect(tokenArg?: string) {
   let token = tokenArg?.trim();
@@ -93,7 +102,7 @@ async function connect(tokenArg?: string) {
 }
 
 function restartReader() {
-  console.log('Restarting the reading app so new articles show up…');
+  console.log('Restarting the reading app so it picks up the changes…');
   const r = spawnSync('systemctl', ['restart', 'xochitl'], { stdio: 'inherit' });
   if (r.status !== 0) console.log('Could not restart it automatically. Restart the tablet to see new articles.');
 }
@@ -101,43 +110,56 @@ function restartReader() {
 async function sync(v: { limit?: string; location?: string; mock?: boolean; 'dry-run'?: boolean; 'no-restart'?: boolean }) {
   const mock = !!v.mock;
   const dryRun = !!v['dry-run'];
-  const { client, manifest, output, imageFetch } = await setup(mock);
-
-  if (!dryRun) {
-    const sent = await sendDeviceHighlights({
-      client,
-      manifest,
-      output,
-      onHighlight: (_file, h, status) => {
-        if (status !== 'duplicate') console.log(`  [${status}] (${highlightColorName(h)}) ${h.text.replace(/\s+/g, ' ')}`);
-      },
-    });
-    const c = sent.counts;
-    console.log(`Highlights: ${c.sent ?? 0} sent, ${c.duplicate ?? 0} already in Readwise, ${(c.queued_offline ?? 0) + (c.needs_attention ?? 0)} waiting.`);
-  }
-
   const limit = v.limit ? Number(v.limit) : undefined;
   if (limit !== undefined && !(limit > 0)) throw new UserError('--limit needs a number above 0.');
-  const result = await syncReader(
-    { client, output, manifest, fetchImages: imageFetch, onProgress: (m) => console.log(`  ${m}`) },
-    { location: v.location ?? 'later', limit, dryRun, showHighlights: false, includeImages: !!imageFetch },
-  );
-  for (const w of result.warnings) console.log(`  warning: ${w}`);
-  // Reader bumps an article whenever it gets a highlight, so core asks to rebuild it;
-  // books with highlights on the tablet are left as they are (see XochitlOutput.put).
-  const kept = result.items.filter((i) => i.action === 'updated' && output.kept.has(i.filename)).length;
-  let line = summarize({ ...result, updated: result.updated - kept }, dryRun);
-  if (kept) line += ` Left ${kept} marked-up ${kept === 1 ? 'article' : 'articles'} as ${kept === 1 ? 'it is' : 'they are'}.`;
-  console.log(line);
+  const { client, manifest, output, imageFetch, librarian } = await setup(mock);
 
-  if (output.changed && !dryRun) {
-    if (v['no-restart']) console.log('New articles will show up after the reading app restarts.');
-    else restartReader();
+  let failure: unknown;
+  try {
+    if (!dryRun) {
+      const sent = await sendDeviceHighlights({
+        client,
+        manifest,
+        output,
+        onHighlight: (_file, h, status) => {
+          if (status !== 'duplicate') console.log(`  [${status}] (${highlightColorName(h)}) ${h.text.replace(/\s+/g, ' ')}`);
+        },
+      });
+      const c = sent.counts;
+      console.log(`Highlights: ${c.sent ?? 0} sent, ${c.duplicate ?? 0} already in Readwise, ${(c.queued_offline ?? 0) + (c.needs_attention ?? 0)} waiting.`);
+    }
+
+    const result = await syncReader(
+      { client, output, manifest, fetchImages: imageFetch, onProgress: (m) => console.log(`  ${m}`) },
+      { location: v.location ?? 'later', limit, dryRun, showHighlights: false, includeImages: !!imageFetch },
+    );
+    for (const w of result.warnings) console.log(`  warning: ${w}`);
+    // Reader bumps an article whenever it gets a highlight, so core asks to rebuild it;
+    // books already opened on the tablet are left as they are (see XochitlOutput.put).
+    const kept = result.items.filter((i) => i.action === 'updated' && output.kept.has(i.filename)).length;
+    let line = summarize({ ...result, updated: result.updated - kept }, dryRun);
+    if (kept) line += ` Left ${kept} ${kept === 1 ? 'article' : 'articles'} you've opened as ${kept === 1 ? 'it is' : 'they are'}.`;
+    console.log(line);
+  } catch (err) {
+    failure = err;
   }
+
+  // Even after a failure, whatever did get written should show up.
+  if (!dryRun) {
+    await output.finish();
+    if (output.needsRestart) {
+      if (v['no-restart']) console.log('New articles will show up after the reading app restarts.');
+      else restartReader();
+      if (!librarian) console.log(LIBRARIAN_TIP);
+    } else if (output.changed) {
+      console.log('The library is up to date, no restart needed.');
+    }
+  }
+  if (failure) throw failure;
 }
 
 async function showHighlights(mock: boolean) {
-  const { output } = await setup(mock);
+  const { output } = await setup(mock, false);
   const docs = await output.documents();
   if (!docs.length) console.log('No InkWise articles on the tablet yet.');
   for (const { filename, uuid } of docs) {
@@ -150,10 +172,15 @@ async function showHighlights(mock: boolean) {
 }
 
 async function status(mock: boolean) {
-  const { manifest, output } = await setup(mock);
+  const { manifest, output, librarian } = await setup(mock);
   const docs = await output.documents();
   const m = await manifest.load();
-  console.log(`${docs.length} InkWise article(s) on the tablet.`);
+  console.log(`InkWise ${VERSION}. ${docs.length} InkWise article(s) on the tablet.`);
+  console.log(
+    librarian
+      ? 'librarian found: new articles show up without restarting the reading app.'
+      : 'librarian not found: new articles need a reading-app restart. Install "librarian" in reManager to skip that.',
+  );
   const waiting = m.pendingHighlights.filter((p) => p.state === 'pending').length;
   const stuck = m.pendingHighlights.filter((p) => p.state === 'needs_attention');
   console.log(`${waiting} highlight(s) waiting to send, ${stuck.length} Readwise couldn't match.`);

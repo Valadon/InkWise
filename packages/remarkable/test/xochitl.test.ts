@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { strToU8, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { epubText, epubTitle } from '../src/epubText.js';
+import type { LibraryControl } from '../src/librarian.js';
 import { XochitlOutput, pageOrder } from '../src/xochitl.js';
 
 function makeEpub(title: string, chapters: string[]): Uint8Array {
@@ -81,6 +82,9 @@ describe('XochitlOutput', () => {
     expect(await out.list()).toEqual([{ name: FILE, size: WIKI.length }]);
     expect(out.changed).toBe(true);
     expect(readdirSync(join(dir, 'xochitl')).some((n) => n.endsWith('.part'))).toBe(false);
+    // Nothing to tell the running app with, so it needs a restart.
+    await out.finish();
+    expect(out.needsRestart).toBe(true);
   });
 
   it('updates a book in place, but never under the reader’s annotations', async () => {
@@ -90,11 +94,22 @@ describe('XochitlOutput', () => {
     await out.put(FILE, v2);
     expect(readFileSync(join(dir, 'xochitl', `${id}.epub`)).equals(Buffer.from(v2))).toBe(true);
     expect(readdirSync(join(dir, 'xochitl')).filter((n) => n.endsWith('.epub'))).toHaveLength(1);
+    expect(out.kept.size).toBe(0);
 
     mkdirSync(join(dir, 'xochitl', id));
     writeFileSync(join(dir, 'xochitl', id, 'page.rm'), fixture('Normal_AB.rm'));
     await out.put(FILE, WIKI);
     expect(readFileSync(join(dir, 'xochitl', `${id}.epub`)).equals(Buffer.from(v2))).toBe(true);
+    expect([...out.kept]).toEqual([FILE]);
+  });
+
+  it('leaves a book alone once it has been opened, even without annotations', async () => {
+    await out.put(FILE, WIKI);
+    const id = byName('reMarkable & friends').id;
+    // The reading app saves its own layout of a book the first time it opens it.
+    writeFileSync(join(dir, 'xochitl', `${id}.pdf`), '%PDF');
+    await out.put(FILE, makeEpub('reMarkable & friends', ['<p>Updated.</p>']));
+    expect(readFileSync(join(dir, 'xochitl', `${id}.epub`)).equals(Buffer.from(WIKI))).toBe(true);
     expect([...out.kept]).toEqual([FILE]);
   });
 
@@ -144,5 +159,82 @@ describe('XochitlOutput', () => {
       ['also', 5],
     ]);
     expect(existsSync(join(dir, 'xochitl', `${id}.epub`))).toBe(true);
+  });
+
+  describe('with librarian', () => {
+    function fakeLibrary() {
+      const calls: string[] = [];
+      const library: LibraryControl & { calls: string[]; failing: boolean } = {
+        calls,
+        failing: false,
+        async createFolder(name, parent) {
+          calls.push(`createFolder ${name} ${parent || '(top)'}`);
+          if (library.failing) throw new Error('no');
+          return `00000000-0000-4000-8000-00000000000${calls.length}`;
+        },
+        async move(id, parent) {
+          calls.push(`move ${id} ${parent}`);
+          if (library.failing) throw new Error('no');
+        },
+        async trash(id) {
+          calls.push(`trash ${id}`);
+          if (library.failing) throw new Error('no');
+        },
+        async rescan() {
+          calls.push('rescan');
+          if (library.failing) throw new Error('no');
+        },
+      };
+      return library;
+    }
+    const withLibrary = (library: LibraryControl) =>
+      new XochitlOutput({ dir: join(dir, 'xochitl'), stateFile: join(dir, 'state.json'), library, now: () => new Date(1_700_000_000_000) });
+
+    it('adds books without a restart: folders through the app, then one rescan', async () => {
+      const library = fakeLibrary();
+      const o = withLibrary(library);
+      await o.put(FILE, WIKI);
+      await o.put('Other__01zzzzzzzzzzzzzzzzzzzzzzzz.epub', makeEpub('Other', ['<p>x</p>']));
+      const folder = '00000000-0000-4000-8000-000000000001';
+      expect(byName('reMarkable & friends').parent).toBe(folder);
+      expect(byName('Inkwise')).toBeUndefined(); // the app makes it, not us
+      expect(library.calls).toEqual(['createFolder Inkwise (top)']);
+      await o.finish();
+      expect(library.calls).toEqual(['createFolder Inkwise (top)', 'rescan']);
+      expect(o.needsRestart).toBe(false);
+      expect(o.changed).toBe(true);
+    });
+
+    it('archives and trashes through the app', async () => {
+      await out.put(FILE, WIKI);
+      await out.put('Other__01zzzzzzzzzzzzzzzzzzzzzzzz.epub', makeEpub('Other', ['<p>x</p>']));
+      const id = byName('reMarkable & friends').id;
+      const other = byName('Other').id;
+      const inkwise = byName('Inkwise').id;
+      const library = fakeLibrary();
+      const o = withLibrary(library);
+      await o.moveToSubfolder(FILE, 'Archive');
+      await o.remove('Other__01zzzzzzzzzzzzzzzzzzzzzzzz.epub');
+      expect(library.calls).toEqual([`createFolder Archive ${inkwise}`, `move ${id} 00000000-0000-4000-8000-000000000001`, `trash ${other}`]);
+      // The app saves those changes itself.
+      expect(metadata(id).parent).toBe(inkwise);
+      expect(metadata(other).parent).toBe(inkwise);
+      await o.finish();
+      expect(o.needsRestart).toBe(false);
+      expect(library.calls.at(-1)).not.toBe('rescan');
+    });
+
+    it('falls back to editing files, and a restart, when librarian fails', async () => {
+      await out.put(FILE, WIKI);
+      const id = byName('reMarkable & friends').id;
+      const library = fakeLibrary();
+      library.failing = true;
+      const o = withLibrary(library);
+      await o.moveToSubfolder(FILE, 'Archive');
+      expect(metadata(id).parent).toBe(byName('Archive').id);
+      expect(o.needsRestart).toBe(true);
+      // Not asked again after the first failure.
+      expect(library.calls).toEqual([`createFolder Archive ${byName('Inkwise').id}`]);
+    });
   });
 });

@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import type { OutputAdapter, RemoteFile } from '@inkwise/core';
 import { assembleHighlights, type AssembledHighlight, type PagePiece } from './assemble.js';
 import { epubText, epubTitle } from './epubText.js';
+import type { LibraryControl } from './librarian.js';
 import { readRmHighlights, RmFormatError } from './rmHighlights.js';
 
 /**
@@ -15,8 +16,9 @@ import { readRmHighlights, RmFormatError } from './rmHighlights.js';
  *   <uuid>.epub       the book itself
  *   <uuid>/           one .rm file per annotated page
  *
- * xochitl reads this directory when it starts, so new documents show up after
- * it restarts (see `XochitlOutput.changed`).
+ * xochitl reads this directory when it starts. While it runs, it only learns
+ * about changes through the librarian extension (see `XochitlOutput.finish`);
+ * without librarian it needs a restart to see them.
  */
 export const XOCHITL_DIR = '/home/root/.local/share/remarkable/xochitl';
 
@@ -123,6 +125,8 @@ export interface XochitlOutputOptions {
   stateFile: string;
   folderName?: string;
   now?: () => Date;
+  /** The running reading app, through librarian. Without it, changes need a restart to show. */
+  library?: LibraryControl | null;
 }
 
 /**
@@ -131,19 +135,41 @@ export interface XochitlOutputOptions {
  */
 export class XochitlOutput implements OutputAdapter {
   readonly name = 'device' as const;
-  /** True once something was written; xochitl needs a restart to show it. */
+  /** True once anything in the library was added, replaced, moved or trashed. */
   changed = false;
-  /** Filenames core asked to rewrite but that were left alone because they're marked up. */
+  /** True when the reading app can't see some change until it restarts. */
+  needsRestart = false;
+  /** Filenames core asked to rewrite but that were left alone because they've been opened. */
   readonly kept = new Set<string>();
   private readonly dir: string;
   private readonly folderName: string;
   private readonly now: () => Date;
+  private library: LibraryControl | null;
   private state: State | null = null;
+  /** Documents written to disk that the running app hasn't been told about. */
+  private unannounced = false;
+  /** Folders made through librarian this run; the app may not have saved them to disk yet. */
+  private readonly fresh = new Set<string>();
 
   constructor(private readonly opts: XochitlOutputOptions) {
     this.dir = opts.dir ?? XOCHITL_DIR;
     this.folderName = opts.folderName ?? 'Inkwise';
     this.now = opts.now ?? (() => new Date());
+    this.library = opts.library ?? null;
+  }
+
+  /**
+   * Tells the reading app about new documents. Call once after a sync, even a
+   * failed one. Afterwards `needsRestart` says whether it still needs a restart.
+   */
+  async finish(): Promise<void> {
+    if (!this.unannounced) return;
+    this.unannounced = false;
+    if (!this.library) {
+      this.needsRestart = true;
+      return;
+    }
+    await this.viaLibrary(() => this.library!.rescan(), async () => {});
   }
 
   /** Document UUID for an Inkwise filename, if it's still in the library. */
@@ -188,12 +214,13 @@ export class XochitlOutput implements OutputAdapter {
     const folder = await this.folder();
     const existing = state.docs[filename];
     if (existing && (await this.isLive(existing))) {
-      // Replacing the book under existing annotations would leave them on the wrong
-      // words, so a document the reader has marked up keeps its original EPUB.
-      if ((await this.listDir(join(this.dir, existing))).some((n) => n.endsWith('.rm'))) {
+      // Once a book has been opened it's left alone: replacing it would move
+      // annotations onto the wrong words and pull it out from under the reader.
+      if (await this.hasBeenOpened(existing)) {
         this.kept.add(filename);
         return;
       }
+      // Never opened, so the app hasn't laid it out yet and reads the new file when it is.
       await this.writeAtomic(`${existing}.epub`, bytes);
       await this.touch(existing);
       this.changed = true;
@@ -208,6 +235,7 @@ export class XochitlOutput implements OutputAdapter {
     state.docs[filename] = id;
     await this.save();
     this.changed = true;
+    this.unannounced = true;
   }
 
   /** Sends the document to the tablet's trash rather than deleting it outright. */
@@ -215,10 +243,15 @@ export class XochitlOutput implements OutputAdapter {
     const state = await this.load();
     const id = state.docs[filename];
     if (!id) return;
-    if (await this.isLive(id)) await this.updateMetadata(id, { parent: 'trash' });
+    if (await this.isLive(id)) {
+      await this.viaLibrary(
+        () => this.library!.trash(id),
+        () => this.updateMetadata(id, { parent: 'trash' }),
+      );
+      this.changed = true;
+    }
     delete state.docs[filename];
     await this.save();
-    this.changed = true;
   }
 
   async moveToSubfolder(filename: string, subfolder: string): Promise<void> {
@@ -229,7 +262,11 @@ export class XochitlOutput implements OutputAdapter {
       state.archiveId = await this.createFolder(subfolder, await this.folder());
       await this.save();
     }
-    await this.updateMetadata(id, { parent: state.archiveId });
+    const archive = state.archiveId;
+    await this.viaLibrary(
+      () => this.library!.move(id, archive),
+      () => this.updateMetadata(id, { parent: archive }),
+    );
     this.changed = true;
   }
 
@@ -254,16 +291,55 @@ export class XochitlOutput implements OutputAdapter {
   }
 
   private async createFolder(name: string, parent: string): Promise<string> {
+    this.changed = true;
+    if (this.library) {
+      try {
+        const id = await this.library.createFolder(name, parent);
+        this.fresh.add(id);
+        return id;
+      } catch {
+        this.library = null;
+      }
+    }
     const id = randomUUID();
     await this.writeAtomic(`${id}.content`, '{}');
     await this.writeAtomic(`${id}.metadata`, JSON.stringify(newMetadata(name, 'CollectionType', parent, this.now()), null, 4));
-    this.changed = true;
+    this.needsRestart = true;
     return id;
   }
 
+  /**
+   * Makes a change through librarian so the running app sees it, or on disk
+   * when librarian isn't there or fails (the app then needs a restart). After a
+   * failure librarian isn't asked again this run.
+   */
+  private async viaLibrary(live: () => Promise<void>, onDisk: () => Promise<void>) {
+    if (this.library) {
+      try {
+        return await live();
+      } catch {
+        this.library = null;
+      }
+    }
+    await onDisk();
+    this.needsRestart = true;
+  }
+
   private async isLive(id: string): Promise<boolean> {
+    if (this.fresh.has(id)) return true;
     const m = await this.readJson(`${id}.metadata`);
     return !!m && !m.deleted && m.parent !== 'trash';
+  }
+
+  /** Annotated, or opened at least once (the app saves its own rendering of a book when it first lays it out). */
+  private async hasBeenOpened(id: string): Promise<boolean> {
+    if ((await this.listDir(join(this.dir, id))).some((n) => n.endsWith('.rm'))) return true;
+    const m = await this.readJson(`${id}.metadata`);
+    if (m?.lastOpened && m.lastOpened !== '0') return true;
+    for (const ext of ['pdf', 'epubindex', 'pagedata']) {
+      if (await stat(join(this.dir, `${id}.${ext}`)).then(() => true, () => false)) return true;
+    }
+    return false;
   }
 
   private async touch(id: string) {

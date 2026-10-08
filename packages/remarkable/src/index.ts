@@ -3,3 +3,4 @@ export * from './assemble.js';
 export * from './epubText.js';
 export * from './xochitl.js';
 export * from './highlightSync.js';
+export * from './librarian.js';

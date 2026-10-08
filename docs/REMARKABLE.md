@@ -35,10 +35,24 @@ So InkWise would be the first on-device Readwise sync for reMarkable, and it wou
 A new `packages/remarkable` that reuses `packages/core` unchanged where it can.
 
 1. **Backend binary.** Bundle core plus a reMarkable adapter into one aarch64 executable (`bun build --compile --target=bun-linux-arm64`, or Node SEA as a fallback). Core is pure TS with injected IO, so this is mostly glue.
-2. **Reader to tablet.** A new `OutputAdapter` writes the EPUB core already builds into the xochitl folder with matching `.metadata`/`.content` files inside an "Inkwise" folder, then asks xochitl to reload (restart, or a xovi hook if one turns out cleaner).
+2. **Reader to tablet.** A new `OutputAdapter` writes the EPUB core already builds into the xochitl folder with matching `.metadata`/`.content` files inside an "Inkwise" folder, then tells the running xochitl about it through the [librarian](https://github.com/rmitchellscott/rm-librarian) xovi extension (see "Refreshing the library" below).
 3. **Tablet to Readwise.** A small TypeScript reader for v6 `.rm` files that pulls out `GlyphRange` text and colour (port the slice of rmscene we need). Each new highlight goes through core's existing `sendHighlight`, which already matches text back to the source HTML and tracks state in the manifest. Colour could map to Readwise tags.
 4. **UI.** An AppLoad app with Connect (token), Sync now, and last-sync status. Auto-sync on a timer or on wake via the backend.
 5. **Ship via Vellum** so it installs from reManager like everything else.
+
+## Refreshing the library without a restart
+
+xochitl reads its library folder when it starts and doesn't notice files added later. Restarting it works (and keeps other mods running) but is clunky, and must never happen while someone is reading.
+
+[librarian](https://github.com/rmitchellscott/rm-librarian) (`librarian` in reManager; it pulls in `xovi-message-broker`) exposes xochitl's own library calls on a pipe: write `>e<signal>:<params>` to `/run/xovi-mb`, read the reply from `/run/xovi-mb-out`. InkWise uses four of them (`src/librarian.ts`):
+
+- `rescanLibrary` once after a sync, so books written to disk show up. It loads every `.metadata` the running library doesn't know yet.
+- `createFolder` for the Inkwise and Archive folders, so they exist in the running library before books go in them.
+- `moveEntry` to archive and `trashEntry` to remove, so xochitl makes the change itself instead of us editing a `.metadata` it holds in memory.
+
+`inkwise-rm` probes for librarian at start (a lookup of a made-up UUID, which librarian echoes). Without it, or if a call fails, InkWise falls back to editing files and restarting xochitl, which is what `XochitlOutput.needsRestart` tracks. Librarian needs software 3.28.
+
+A book is never replaced once it's been opened (it has page files, a saved layout, or a `lastOpened` time): replacing it would move annotations onto the wrong words or pull it out from under the reader. A never-opened book is overwritten in place, which needs no restart because xochitl only reads the EPUB when the book is first opened.
 
 ## What changes from the Supernote UX
 
@@ -63,7 +77,8 @@ Use the reMarkable cloud API (like rmapi) from a server or scheduled job instead
 2. ~~Highlight reader~~ Done: `rmHighlights.ts` + `assemble.ts`. All three of Lance's test highlights (two-line, three-line over links, across a page turn) come back whole.
 3. ~~Document writer~~ Done, against a fake library folder: `xochitl.ts` (`XochitlOutput`) puts Reader EPUBs in an "Inkwise" folder, archives to "Inkwise/Archive", sends removed ones to the tablet's trash, and never replaces a book that has annotations. `highlightSync.ts` sends every highlight on every Inkwise book to Readwise; a full round trip passes against the fake Readwise API.
 4. ~~Check the `.metadata`/`.content` we write against a real one~~ Done against Lance's Paper Pro on software 3.28.0.172: metadata now has the same fields, and EPUBs still use the flat `pages` list (`formatVersion: 1`), which `pageOrder` reads. The `.pdf` xochitl renders from an EPUB has broken ligature mappings ("E cient", "o site"), which is where the garbled highlight text comes from; we match against the EPUB text instead.
-5. Device runtime: one aarch64 binary (`bun build --compile`) that runs sync, then restarts xochitl only when `XochitlOutput.changed` is set, plus an AppLoad screen (Connect, Sync now, last result).
-6. Vellum package so it installs from reManager.
+5. ~~Device runtime~~ Done: `inkwise-rm`, one aarch64 binary (`bun build --compile`). Tested on Lance's Paper Pro with real Readwise. Uses librarian when it's installed; otherwise restarts xochitl only when `XochitlOutput.needsRestart` is set.
+6. AppLoad screen (Connect, Sync now, last result) and automatic syncing.
+7. Vellum package so it installs from reManager, depending on `librarian`.
 
-Open questions: whether a xovi hook can refresh the library without restarting xochitl; whether growing an existing highlight should replace the old one in Readwise (today it adds a second one).
+Open questions: whether growing an existing highlight should replace the old one in Readwise (today it adds a second one).
