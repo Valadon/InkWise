@@ -1,5 +1,6 @@
 import type { SendResult } from '@inkwise/core';
 import { SHADED, type InkwiseApp } from './app';
+import { errorText } from './log';
 
 export type HighlightOutcome = SendResult & { selection?: string; shading?: string };
 
@@ -67,11 +68,12 @@ export async function quickSend(
     r = { status: 'needs_attention', message: err instanceof Error ? err.message : String(err) };
   }
   state.finish(r);
+  const show = needsScreen(r);
   try {
-    if (needsScreen(r)) await ui.show();
-    else await ui.close();
-  } catch {
-    // The host refusing to show or close the view isn't worth surfacing.
+    const shown = show ? await ui.show() : await ui.close();
+    await app.log.add(`quick send: ${show ? 'opened the screen' : 'stayed quiet'} (host said ${String(shown)}); marking: ${r.shading ?? 'not attempted'}`);
+  } catch (err) {
+    await app.log.add(`quick send: the host wouldn't ${show ? 'open' : 'close'} the screen: ${errorText(err)}`);
   }
   return r;
 }

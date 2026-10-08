@@ -251,7 +251,9 @@ function needsWrite(
   const entry = manifest.documents[doc.id];
   const onDisk = existingById.get(doc.id);
   if (!onDisk) return true;
-  if (!entry) return false; // adopt the other tool's copy
+  // Adopt a copy written by the other tool (or before a reinstall wiped the
+  // manifest), unless it should show highlights it can't be known to have.
+  if (!entry) return showHighlights && highlightsKey(manifest.docHighlights[doc.id], style) !== '';
   if (showHighlights && (entry.marked ?? '') !== highlightsKey(manifest.docHighlights[doc.id], style)) return true;
   return entry.updatedAt !== doc.updated_at || entry.filename !== onDisk;
 }

@@ -71,6 +71,7 @@ For each passage below, select it in an Inkwise EPUB and tap **Send highlight**.
 - [ ] **3.11a** Select that passage again and tap Send highlight. A screen opens with the note field and **Delete highlight**. Add a note; it should show in Reader. Then delete it; the mark goes and Reader no longer has it.
 - [ ] **3.11b** Change the font size and margins. The mark should follow the text.
 - [ ] **3.11c** Highlight a passage in Reader on your phone, tap **Sync Reader**, and check the passage is marked on the Manta.
+- [ ] **3.11d** In Inkwise settings, tap **Mark highlights now**. It should say how many articles it marked; anything else names the article and the problem.
 - [ ] **3.12** Select only part of a marked passage and tap Send highlight. It should open the existing highlight, not send a new one.
 - [ ] **3.13** Turn off Wi-Fi and send a highlight. Expect "Saved offline, will send on next sync." Turn Wi-Fi back on and tap **Sync Reader**. The result line should say it sent 1 saved highlight.
 - [ ] **3.14** Select text in a non-Inkwise PDF and tap Send highlight. Expect "This document isn't from Readwise."
@@ -102,6 +103,7 @@ These are the open questions only a device can answer. If any of them goes wrong
 Post in the project thread with:
 - the step number,
 - exactly what the screen said (a photo works),
-- your firmware version (Settings → About).
+- your firmware version (Settings → About),
+- `MyStyle/Inkwise/inkwise-log.txt`, copied off with Browse & Access. It records each sync, send and mark step with any error, and never the token.
 
-On the device, Inkwise keeps its state in the plugin's private folder. To start over, remove and re-add the plugin.
+On the device, Inkwise keeps its state in the plugin's private folder, with a backup in `MyStyle/Inkwise/backup/`. To start over, remove the plugin, delete that backup folder, and add the plugin again.

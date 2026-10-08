@@ -38,6 +38,8 @@ export class MemoryFs implements DeviceFs {
   dirs = new Set<string>(['/']);
   /** Paths whose writes should fail, to simulate permission errors. */
   denyWrite = new Set<string>();
+  /** Targets a rename onto should fail, like a device that won't replace a file. */
+  denyMoveOnto = new Set<string>();
 
   async exists(path: string) {
     return this.files.has(path) || this.dirs.has(path);
@@ -74,6 +76,7 @@ export class MemoryFs implements DeviceFs {
     this.files.set(path, bytes);
   }
   async move(from: string, to: string) {
+    if (this.denyMoveOnto.has(to)) throw new Error(`EPERM: rename onto ${to}`);
     const b = this.files.get(from);
     if (!b) throw new Error(`ENOENT: ${from}`);
     if (!this.dirs.has(dirOf(to))) throw new Error(`ENOENT: no such directory ${dirOf(to)}`);

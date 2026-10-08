@@ -13,6 +13,7 @@ import { HIGHLIGHT_BLOCK_CLASS, HIGHLIGHT_CLASS, highlightCss, type HighlightSty
 const HIGHLIGHT_RULE = new RegExp(`^(?:span\\.${HIGHLIGHT_CLASS}|\\.${HIGHLIGHT_BLOCK_CLASS})\\s*\\{[^}]*\\}[ \\t]*\\n?`, 'gm');
 
 const OPEN_MARK = `<span class="${HIGHLIGHT_CLASS}">`;
+const TEXT_FILE = /\.(x?html?|css|opf|ncx|xml|txt|svg)$/i;
 const BLOCK_ATTR = ` class="${HIGHLIGHT_BLOCK_CLASS}"`;
 
 /** The blocks a highlight's paragraph mark goes on: never a wrapper like div or section, which could be the whole article. */
@@ -305,8 +306,12 @@ export function markEpub(
     files[name] = strToU8(rest + (rest === '' || rest.endsWith('\n') ? '' : '\n') + highlightCss(style));
   }
 
-  // The mimetype entry must come first and be stored uncompressed.
+  // The mimetype entry must come first and be stored uncompressed. Images are
+  // already compressed, and deflating them again is most of the work on a
+  // tablet's CPU, so they're stored as they are.
   const ordered: Record<string, any> = { mimetype: [files.mimetype, { level: 0 }] };
-  for (const [name, data] of Object.entries(files)) if (name !== 'mimetype') ordered[name] = data;
-  return { bytes: zipSync(ordered, { level: 9 }), marked, missing };
+  for (const [name, data] of Object.entries(files)) {
+    if (name !== 'mimetype') ordered[name] = TEXT_FILE.test(name) ? data : [data, { level: 0 }];
+  }
+  return { bytes: zipSync(ordered, { level: 6 }), marked, missing };
 }

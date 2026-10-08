@@ -51,7 +51,7 @@ Inkwise asks for each one the first time it's needed, and says why.
 | File read | Seeing which articles are already in the folder, reading a renamed EPUB's id, reading `token.txt` and the backup |
 | File delete | The optional delete-on-Done setting |
 
-The token, the manifest and the highlight queue live in the plugin's private folder. Inkwise also copies the settings and the manifest (never the token) to `MyStyle/Inkwise/backup/`, so an uninstall doesn't lose them. Delete that folder to start fresh. If your Supernote syncs `MyStyle` to a cloud service, the backup and `token.txt` go along with it.
+The token, the manifest and the highlight queue live in the plugin's private folder. Inkwise also copies the settings and the manifest (never the token) to `MyStyle/Inkwise/backup/`, so an uninstall doesn't lose them. Delete that folder to start fresh. Inkwise also keeps a log of what it did in `MyStyle/Inkwise/inkwise-log.txt` (never the token), which is the first thing to look at when something misbehaves. If your Supernote syncs `MyStyle` to a cloud service, the backup, the log and `token.txt` go along with it.
 
 ## Getting highlights to match
 

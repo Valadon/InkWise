@@ -23,7 +23,9 @@ import {
   type ReviewAction,
   type SendResult,
 } from '@inkwise/core';
+import { BUILD } from '../buildInfo';
 import { dirOf, joinPath, type DeviceFs } from './fs';
+import { DeviceLog, errorText, preview } from './log';
 
 /** What the plugin needs from the Supernote host (wrapped around sn-plugin-lib in host.ts). */
 export interface Host {
@@ -103,13 +105,18 @@ export const markSidecar = (path: string) => `${path}.mark`;
 export class InkwiseApp {
   private dir: string | null = null;
 
+  /** MyStyle/Inkwise/inkwise-log.txt, for the user to send when something misbehaves. */
+  readonly log: DeviceLog;
+
   constructor(
     readonly host: Host,
     readonly fs: DeviceFs,
     readonly fetch: FetchLike,
     /** Fetch used for images (on the device it downloads through the file system). */
     readonly imageFetch?: FetchLike,
-  ) {}
+  ) {
+    this.log = new DeviceLog(fs, () => host.hasPermission('plugin.permission.FILE:WRITE'), SHARED_DIR, BUILD.version);
+  }
 
   // ---- paths & storage -------------------------------------------------
 
@@ -331,11 +338,17 @@ export class InkwiseApp {
           highlightStyle: settings.highlightStyle,
         },
       );
+      const counts: Record<string, number> = {};
+      for (const i of result.items) counts[i.action] = (counts[i.action] ?? 0) + 1;
+      await this.log.add(`sync: ${result.summary} (${Object.entries(counts).map(([k, n]) => `${n} ${k}`).join(', ') || 'nothing'})`);
+      for (const i of result.items) if (i.action === 'failed') await this.log.add(`sync failed on ${i.filename}: ${i.error ?? 'unknown error'}`);
+      for (const w of result.warnings) await this.log.add(`sync warning: ${w}`);
       const tidied = await this.tidyArchived();
       if (!tidied) return result.summary;
       const verb = (await this.settings()).afterArchive === 'delete' ? 'Removed' : 'Moved';
       return `${result.summary} ${verb} ${tidied} finished ${tidied === 1 ? 'article' : 'articles'}${verb === 'Moved' ? ' to Archive' : ''}.`;
     } catch (err) {
+      await this.log.add(`sync failed: ${errorText(err)}`);
       return describeSyncError(err);
     }
   }
@@ -344,9 +357,11 @@ export class InkwiseApp {
   async sendSelection(): Promise<SendResult & { selection?: string; shading?: string }> {
     const sel = await this.host.selectedText();
     if (!sel.ok || !sel.text.trim()) {
+      await this.log.add(`send: no selection (${sel.ok ? 'empty' : sel.error})`);
       return { status: 'empty', message: 'Select some text first, then tap Send highlight.' };
     }
     const filePath = await this.host.currentFilePath();
+    await this.log.add(`send: ${preview(sel.text)} from ${filePath ?? 'no file path'}`);
     if (!filePath) return { status: 'not_inkwise', message: "This document isn't from Readwise.", selection: sel.text };
     try {
       await this.ensure('plugin.permission.INTERNET');
@@ -357,6 +372,7 @@ export class InkwiseApp {
     try {
       client = await this.client();
     } catch (err) {
+      await this.log.add(`send: no token (${errorText(err)})`);
       return { status: 'token_rejected', message: (err as Error).message, selection: sel.text };
     }
     const result = await sendHighlight({
@@ -366,6 +382,7 @@ export class InkwiseApp {
       text: sel.text,
       readIdentifier: (p) => this.readIdentifier(p),
     });
+    await this.log.add(`send: ${result.status} for ${result.docId ?? 'unknown article'}: ${result.message}`);
     let shading: string | undefined;
     if (result.docId && (result.status === 'sent' || result.status === 'queued_offline' || result.status === 'duplicate')) {
       shading = await this.shadeOpenFile(filePath, result.docId);
@@ -377,32 +394,127 @@ export class InkwiseApp {
    * Rewrite the open EPUB so its highlights show, then have the DOC app reload
    * it. The SDK can't draw a highlight on a DOC page, so this is the way to make
    * a sent highlight visible. Returns a line for the screen, or undefined when
-   * shading is off or doesn't apply.
+   * marking is off or doesn't apply.
    */
   async shadeOpenFile(filePath: string, docId: string, force = false): Promise<string | undefined> {
+    const r = await this.markFile(filePath, docId, force);
+    if (r.changed) {
+      try {
+        await this.host.reloadFile();
+        await this.log.add('mark: asked the reader to reload the file');
+      } catch (err) {
+        await this.log.add(`mark: reload failed: ${errorText(err)}`);
+        return `Marked, but the page didn't refresh (${errorText(err)}). Close and reopen the article to see it.`;
+      }
+    }
+    return r.message;
+  }
+
+  /**
+   * Mark a document's recorded highlights in one EPUB on disk. `force` rewrites
+   * even with nothing to mark, to clear a deleted highlight.
+   */
+  private async markFile(
+    filePath: string,
+    docId: string,
+    force = false,
+  ): Promise<{ changed: boolean; message?: string }> {
     const { showHighlights, highlightStyle } = await this.settings();
-    if (!/\.epub$/i.test(filePath) || !showHighlights) return undefined;
+    if (!/\.epub$/i.test(filePath) || !showHighlights) {
+      await this.log.add(`mark: skipped (${showHighlights ? 'not an EPUB path' : 'marking is off'})`);
+      return { changed: false };
+    }
+    const started = Date.now();
     try {
       const store = await this.manifest();
       const texts = (await store.load()).docHighlights[docId] ?? [];
-      // `force` rewrites even with nothing to shade, to clear a deleted highlight.
-      if (!texts.length && !force) return undefined;
+      if (!texts.length && !force) {
+        await this.log.add(`mark: no highlights recorded for ${docId}`);
+        return { changed: false };
+      }
       await this.ensure('plugin.permission.FILE:WRITE');
-      const r = markEpub(await this.fs.readBytes(filePath), texts, highlightStyle);
-      if (!r) return "Couldn't mark it on the page: the file isn't a readable EPUB.";
+      const before = await this.fs.readBytes(filePath);
+      const r = markEpub(before, texts, highlightStyle);
+      if (!r) {
+        await this.log.add(`mark: ${filePath} isn't a readable EPUB (${before.length} bytes)`);
+        return { changed: false, message: "Couldn't mark it on the page: the file isn't a readable EPUB." };
+      }
+      await this.log.add(
+        `mark: ${r.marked} of ${texts.length} found (${highlightStyle}), ${before.length} -> ${r.bytes.length} bytes in ${Date.now() - started} ms`,
+      );
+      for (const h of r.missing) await this.log.add(`mark: not found in the text: ${preview(h)}`);
+      const how = await this.replaceFile(filePath, r.bytes);
       const name = filePath.split('/').pop()!;
-      const tmp = joinPath(dirOf(filePath), `.${name}.part`);
-      await this.fs.writeBytes(tmp, r.bytes);
-      await this.fs.move(tmp, filePath);
       await updateManifest(store, (m) => {
         const d = m.documents[docId];
         if (d && d.filename === name) d.marked = highlightsKey(texts, highlightStyle);
       });
-      await this.host.reloadFile();
-      return r.marked || !texts.length ? SHADED : "Couldn't find the passage on the page to mark it.";
+      await this.log.add(`mark: saved ${name} (${how}) after ${Date.now() - started} ms`);
+      return {
+        changed: true,
+        message: r.marked || !texts.length ? SHADED : "Couldn't find the passage on the page to mark it.",
+      };
     } catch (err) {
-      return `Couldn't mark it on the page: ${err instanceof Error ? err.message : String(err)}`;
+      await this.log.add(`mark: failed after ${Date.now() - started} ms: ${errorText(err)}`);
+      return { changed: false, message: `Couldn't mark it on the page: ${errorText(err)}` };
     }
+  }
+
+  /**
+   * Replace a file's contents: write a hidden temp file and rename it over the
+   * old one, so a reader never sees half a file. If the rename is refused,
+   * write over the old file directly instead. Never deletes the original first.
+   */
+  private async replaceFile(path: string, bytes: Uint8Array): Promise<'renamed' | 'written in place'> {
+    const tmp = joinPath(dirOf(path), `.${path.split('/').pop()}.part`);
+    await this.fs.writeBytes(tmp, bytes);
+    try {
+      await this.fs.move(tmp, path);
+      return 'renamed';
+    } catch (err) {
+      await this.log.add(`rename over ${path} refused (${errorText(err)}), writing in place`);
+      await this.fs.writeBytes(path, bytes);
+      await this.fs.unlink(tmp).catch(() => {});
+      return 'written in place';
+    }
+  }
+
+  /**
+   * Settings button: mark every article that has highlights, right now, and
+   * say what happened. Shows on screen what quick send can only log.
+   */
+  async markAll(): Promise<{ ok: boolean; message: string }> {
+    try {
+      await this.ensure('plugin.permission.FILE:READ');
+      await this.ensure('plugin.permission.FILE:WRITE');
+    } catch (err) {
+      return { ok: false, message: errorText(err) };
+    }
+    if (!(await this.settings()).showHighlights) return { ok: false, message: 'Marking highlights is off. Pick a style above first.' };
+    const m = await (await this.manifest()).load();
+    const library = await this.libraryDir();
+    const onDisk = new Map<string, string>();
+    for (const f of (await this.fs.exists(library)) ? await this.fs.listFiles(library) : []) {
+      const id = /__([0-9a-z]{20,40})\.epub$/.exec(f.name)?.[1];
+      if (id) onDisk.set(id, f.name);
+    }
+    const docs = Object.entries(m.docHighlights).filter(([id, texts]) => texts.length && onDisk.has(id));
+    await this.log.add(`mark all: ${docs.length} articles with highlights in ${library}`);
+    if (!docs.length) {
+      return { ok: false, message: 'Inkwise has no highlights on record for articles in your folder. Tap Sync Reader, then try again.' };
+    }
+    const open = await this.host.currentFilePath().catch(() => null);
+    let done = 0;
+    const problems: string[] = [];
+    for (const [id] of docs) {
+      const path = joinPath(library, onDisk.get(id)!);
+      const r = await this.markFile(path, id);
+      if (r.changed && r.message === SHADED) done++;
+      else problems.push(`${m.documents[id]?.title ?? onDisk.get(id)}: ${r.message ?? 'skipped'}`);
+      if (r.changed && path === open) await this.host.reloadFile().catch(() => {});
+    }
+    const head = `Marked highlights in ${done} of ${docs.length} ${docs.length === 1 ? 'article' : 'articles'}.`;
+    return { ok: !problems.length, message: problems.length ? `${head} ${problems[0]}` : head };
   }
 
   async addNote(args: { docId: string; text: string; note: string; highlightId?: string }) {
@@ -532,16 +644,15 @@ export class InkwiseApp {
 
   output(dir: string): OutputAdapter {
     const fs = this.fs;
+    const app = this;
     return {
       name: 'device',
       async list() {
         return (await fs.exists(dir)) ? fs.listFiles(dir) : [];
       },
       async put(filename, bytes) {
-        // Write to a hidden temp name first so the DOC app never sees half a file.
-        const tmp = joinPath(dir, `.${filename}.part`);
-        await fs.writeBytes(tmp, bytes);
-        await fs.move(tmp, joinPath(dir, filename));
+        // Through a hidden temp name, so the DOC app never sees half a file.
+        await app.replaceFile(joinPath(dir, filename), bytes);
       },
       async remove(filename) {
         await fs.unlink(joinPath(dir, filename));

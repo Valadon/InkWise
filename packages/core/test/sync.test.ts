@@ -95,6 +95,19 @@ describe('syncReader', () => {
     expect((await syncReader(deps, { highlightStyle: 'bold' })).updated).toBe(0);
   });
 
+  it('rewrites a file it finds on disk when it has highlights to show (after a reinstall wiped the manifest)', async () => {
+    const { fake, output, manifest, deps } = setup();
+    const doc = fake.documents.find((d) => d.id.includes('longform'))!;
+    const at = '2026-10-08T02:00:00Z';
+    fake.highlights.push({ id: 'hlA', parent_id: doc.id, content: 'None of this is new.', notes: '', tags: [], createdAt: at, updatedAt: at });
+    await syncReader(deps, { showHighlights: false });
+    manifest.manifest = { ...manifest.manifest, documents: {}, docHighlights: {}, highlightsSyncedAt: undefined };
+    const r = await syncReader(deps);
+    expect(r.items.find((i) => i.id === doc.id)?.action).toBe('updated');
+    expect(r.items.filter((i) => i.action === 'adopted')).toHaveLength(3);
+    expect(strFromU8(unzipSync(output.files.get(epubFilename(doc))!)['OEBPS/article.xhtml']!)).toContain('<span class="rw-hl">None of this is new.</span>');
+  });
+
   it('leaves EPUBs plain when highlights are turned off', async () => {
     const { fake, output, deps } = setup();
     const doc = fake.documents[0]!;

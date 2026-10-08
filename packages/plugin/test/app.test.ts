@@ -241,6 +241,34 @@ describe('Send highlight', () => {
     expect(await app.sync(() => {})).toBe('Synced 0 new, 0 updated.');
   });
 
+  it('writes over the file in place when the device refuses the rename, and logs each step', async () => {
+    const path = `${LIBRARY}/${epubFilename(longform)}`;
+    host.filePath = path;
+    host.selection = 'None of this is new.';
+    fs.denyMoveOnto.add(path);
+    const r = await app.sendSelection();
+    expect(r.shading).toBe(SHADED);
+    expect(strFromU8(unzipSync(fs.files.get(path)!)['OEBPS/article.xhtml']!)).toContain('<span class="rw-hl">None of this is new.</span>');
+    expect([...fs.files.keys()].some((k) => k.endsWith('.part'))).toBe(false);
+    const log = await fs.readText(`${STORAGE_ROOT}/MyStyle/Inkwise/inkwise-log.txt`);
+    expect(log).toContain('send: sent');
+    expect(log).toMatch(/mark: 1 of 1 found \(both\)/);
+    expect(log).toContain('writing in place');
+    expect(log).toContain('(written in place)');
+    expect(log).not.toContain('device-token');
+  });
+
+  it('Mark highlights now marks every article with highlights and says so', async () => {
+    host.selection = 'None of this is new.';
+    await app.sendSelection();
+    // Pretend the file never got marked.
+    const plain = (await import('@inkwise/core')).buildEpub(longform, { modified: new Date('2026-10-08T00:00:00Z') });
+    fs.files.set(`${LIBRARY}/${epubFilename(longform)}`, plain.bytes);
+    const r = await app.markAll();
+    expect(r).toEqual({ ok: true, message: 'Marked highlights in 1 of 1 article.' });
+    expect(strFromU8(unzipSync(fs.files.get(`${LIBRARY}/${epubFilename(longform)}`)!)['OEBPS/article.xhtml']!)).toContain('rw-hl');
+  });
+
   it('marks in the style picked in settings, and redoes old articles on sync', async () => {
     const path = `${LIBRARY}/${epubFilename(longform)}`;
     host.filePath = path;
