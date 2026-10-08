@@ -29,17 +29,50 @@ export interface XochitlMetadata {
   [key: string]: unknown;
 }
 
+/** Metadata for a new item, with the same fields a Paper Pro on 3.28 writes. */
 export function newMetadata(name: string, type: XochitlMetadata['type'], parent: string, now: Date): XochitlMetadata {
   const ms = String(now.getTime());
   return {
     createdTime: ms,
+    deleted: false,
     lastModified: ms,
-    lastOpened: '',
+    lastOpened: '0',
     lastOpenedPage: 0,
+    metadatamodified: false,
+    modified: false,
+    new: false,
     parent,
     pinned: false,
+    source: '',
+    synced: false,
     type,
+    version: 0,
     visibleName: name,
+  };
+}
+
+/**
+ * `.content` for a new EPUB: the settings a Paper Pro writes, minus the page
+ * list and layout details, which xochitl fills in when it first lays the book out.
+ */
+export function newEpubContent(): Record<string, unknown> {
+  return {
+    coverPageNumber: -1,
+    documentMetadata: {},
+    dummyDocument: false,
+    extraMetadata: {},
+    fileType: 'epub',
+    fontName: '',
+    formatVersion: 1,
+    lineHeight: -1,
+    orientation: 'portrait',
+    pageCount: 0,
+    pageTags: [],
+    pages: [],
+    tags: [],
+    textAlignment: 'justify',
+    textScale: 1,
+    zoomMode: 'bestFit',
   };
 }
 
@@ -164,7 +197,7 @@ export class XochitlOutput implements OutputAdapter {
     const id = randomUUID();
     const name = epubTitle(bytes) ?? filename.replace(/__[0-9a-z]+\.epub$/, '').replace(/-/g, ' ');
     await this.writeAtomic(`${id}.epub`, bytes);
-    await this.writeAtomic(`${id}.content`, JSON.stringify({ fileType: 'epub' }, null, 4));
+    await this.writeAtomic(`${id}.content`, JSON.stringify(newEpubContent(), null, 4));
     // Metadata last: it's what makes xochitl treat the files as a document.
     await this.writeAtomic(`${id}.metadata`, JSON.stringify(newMetadata(name, 'DocumentType', folder, this.now()), null, 4));
     state.docs[filename] = id;

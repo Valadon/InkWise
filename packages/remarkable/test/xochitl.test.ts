@@ -61,8 +61,8 @@ describe('pageOrder', () => {
     const content = { cPages: { pages: [{ id: 'b', idx: { value: 'bb' } }, { id: 'x', idx: { value: 'ab' }, deleted: { value: 1 } }, { id: 'a', idx: { value: 'ba' } }] } };
     expect(pageOrder(content)).toEqual(['a', 'b']);
   });
-  it('reads the older flat page list', () => {
-    expect(pageOrder({ pages: ['p1', 'p2'] })).toEqual(['p1', 'p2']);
+  it('reads the flat page list (EPUBs on 3.28 still use it)', () => {
+    expect(pageOrder({ formatVersion: 1, pages: ['p1', 'p2'], redirectionPageMap: [0, 1] })).toEqual(['p1', 'p2']);
   });
 });
 
@@ -73,7 +73,10 @@ describe('XochitlOutput', () => {
     expect(folder).toMatchObject({ type: 'CollectionType', parent: '' });
     const book = byName('reMarkable & friends');
     expect(book).toMatchObject({ type: 'DocumentType', parent: folder.id, lastModified: '1700000000000' });
-    expect(JSON.parse(readFileSync(join(dir, 'xochitl', `${book.id}.content`), 'utf8'))).toEqual({ fileType: 'epub' });
+    expect(JSON.parse(readFileSync(join(dir, 'xochitl', `${book.id}.content`), 'utf8'))).toMatchObject({ fileType: 'epub', pages: [] });
+    // The fields a Paper Pro on 3.28 writes for a book (values left out).
+    const PAPER_PRO_METADATA = ['createdTime', 'deleted', 'lastModified', 'lastOpened', 'lastOpenedPage', 'metadatamodified', 'modified', 'new', 'parent', 'pinned', 'source', 'synced', 'type', 'version', 'visibleName'];
+    expect(Object.keys(metadata(book.id)).sort()).toEqual(PAPER_PRO_METADATA);
     expect(readFileSync(join(dir, 'xochitl', `${book.id}.epub`)).equals(Buffer.from(WIKI))).toBe(true);
     expect(await out.list()).toEqual([{ name: FILE, size: WIKI.length }]);
     expect(out.changed).toBe(true);
