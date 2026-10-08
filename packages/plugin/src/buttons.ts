@@ -13,10 +13,11 @@ type Listener = (screen: Screen) => void;
  * Remembers which button opened the plugin view. Button presses arrive at module
  * level (index.js) and the React tree may mount after them.
  */
-class ScreenStore {
+export class ScreenStore {
   private current: Screen = 'sync';
   private seq = 0;
   private handled = 0;
+  private lastPress = { screen: '' as Screen | '', at: 0 };
   private listeners = new Set<Listener>();
 
   get screen() {
@@ -38,7 +39,13 @@ class ScreenStore {
     return true;
   }
 
-  set(screen: Screen) {
+  /** The same button reported twice within this window counts as one tap. */
+  static readonly DOUBLE_TAP_MS = 2000;
+
+  set(screen: Screen, now = Date.now()) {
+    const repeat = screen === this.lastPress.screen && now - this.lastPress.at < ScreenStore.DOUBLE_TAP_MS;
+    this.lastPress = { screen, at: now };
+    if (repeat && screen !== 'settings') return;
     this.current = screen;
     this.seq++;
     for (const l of this.listeners) l(screen);
