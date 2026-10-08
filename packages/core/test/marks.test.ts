@@ -1,6 +1,6 @@
-import { strFromU8, unzipSync } from 'fflate';
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
-import { buildEpub, markEpub, markHighlights, stripMarks } from '../src/index.js';
+import { HIGHLIGHT_CSS, buildEpub, markEpub, markHighlights, stripMarks } from '../src/index.js';
 import { fixture } from './helpers.js';
 
 const page = (body: string) =>
@@ -51,6 +51,21 @@ describe('markEpub', () => {
     expect(Object.keys(files)[0]).toBe('mimetype');
     expect(strFromU8(files['OEBPS/article.xhtml']!)).toContain(`<span class="rw-hl">${sentence}</span>`);
     expect(strFromU8(files['OEBPS/style.css']!)).toContain('span.rw-hl');
+  });
+
+  it('swaps an older highlight rule for the current one, once', () => {
+    const doc = fixture('longform');
+    const files = unzipSync(buildEpub(doc, { modified: new Date('2026-10-08T00:00:00Z') }).bytes);
+    const css = strFromU8(files['OEBPS/style.css']!);
+    files['OEBPS/style.css'] = strToU8(css.replace(HIGHLIGHT_CSS, 'span.rw-hl { background-color: #d2d2d2; }\n'));
+    const old = zipSync({ mimetype: [files.mimetype!, { level: 0 }], ...files });
+    const r = markEpub(old, ['None of this is new.'])!;
+    const after = strFromU8(unzipSync(r.bytes)['OEBPS/style.css']!);
+    expect(after.match(/span\.rw-hl/g)).toHaveLength(1);
+    expect(after).toContain(HIGHLIGHT_CSS);
+    expect(after).toContain('figcaption {');
+    // Marking again leaves the stylesheet alone.
+    expect(strFromU8(unzipSync(markEpub(r.bytes, ['None of this is new.'])!.bytes)['OEBPS/style.css']!)).toBe(after);
   });
 
   it('returns null for something that is not an EPUB', () => {

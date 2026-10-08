@@ -1,5 +1,6 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { markHighlights } from './marks.js';
+import { HIGHLIGHT_CSS } from './markStyle.js';
 import { cleanHtml, escapeAttr, escapeText } from './html.js';
 import type { ReaderDocument } from './types.js';
 
@@ -41,8 +42,7 @@ pre { white-space: pre-wrap; word-wrap: break-word; font-size: 0.85em; border: 1
 code { font-size: 0.9em; }
 img { max-width: 100%; height: auto; }
 figure { margin: 1em 0; text-align: center; }
-span.rw-hl { background-color: #d2d2d2; }
-figcaption { font-size: 0.85em; font-style: italic; }
+${HIGHLIGHT_CSS}figcaption { font-size: 0.85em; font-style: italic; }
 table { border-collapse: collapse; max-width: 100%; font-size: 0.85em; }
 td, th { border: 1px solid #000; padding: 0.2em 0.4em; vertical-align: top; }
 a { color: inherit; text-decoration: underline; }

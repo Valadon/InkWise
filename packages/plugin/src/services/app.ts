@@ -43,9 +43,9 @@ export type Permission =
 
 const PERMISSION_REASONS: Record<Permission, string> = {
   'plugin.permission.INTERNET': 'Inkwise talks to Readwise to fetch your articles and send highlights. Choose "Always allow" so you are not asked every time.',
-  'plugin.permission.FILE:READ': 'Inkwise reads its own EPUBs in Document/Inkwise to match highlights to articles, and can import your token from MyStyle/Inkwise/token.txt.',
-  'plugin.permission.FILE:WRITE': 'Inkwise saves articles as EPUBs in Document/Inkwise so the built-in reader can open them.',
-  'plugin.permission.FILE:DELETE': 'Inkwise removes articles you archived (only if you turn that on) and deletes the token file after importing it.',
+  'plugin.permission.FILE:READ': 'Inkwise reads its own EPUBs in Document/Inkwise to match highlights to articles, and reads your token and its backup from MyStyle/Inkwise.',
+  'plugin.permission.FILE:WRITE': 'Inkwise saves articles as EPUBs in Document/Inkwise so the built-in reader can open them, and backs up its settings to MyStyle/Inkwise.',
+  'plugin.permission.FILE:DELETE': 'Inkwise removes articles you archived (only if you turn that on).',
 };
 
 export type AfterArchive = 'keep' | 'move' | 'delete';
@@ -76,12 +76,18 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 export const STORAGE_ROOT = '/storage/emulated/0';
-export const TOKEN_IMPORT_PATH = `${STORAGE_ROOT}/MyStyle/Inkwise/token.txt`;
+export const SHARED_DIR = `${STORAGE_ROOT}/MyStyle/Inkwise`;
+export const TOKEN_IMPORT_PATH = `${SHARED_DIR}/token.txt`;
+/**
+ * Copies of settings.json and manifest.json (never the token). Uninstalling the
+ * plugin wipes its private folder, and these bring everything back.
+ */
+export const BACKUP_DIR = `${SHARED_DIR}/backup`;
 
 export class PermissionError extends Error {}
 
 /** What a successful shade reports; quick send stays silent when it sees this. */
-export const SHADED = 'Shaded on the page.';
+export const SHADED = 'Marked on the page.';
 
 /** The Supernote keeps a document's handwriting in a sidecar file next to it. */
 export const markSidecar = (path: string) => `${path}.mark`;
@@ -115,10 +121,12 @@ export class InkwiseApp {
   async manifest(): Promise<ManifestStore> {
     const path = joinPath(await this.privateDir(), 'manifest.json');
     const fs = this.fs;
+    const app = this;
     return textManifestStore({
       async read() {
         const main = (await fs.exists(path)) ? await fs.readText(path) : null;
-        if (main === null || parses(main)) return main;
+        if (main === null) return app.restore('manifest.json', path);
+        if (parses(main)) return main;
         // Corrupt manifest: keep a copy for diagnosis, then fall back to the last
         // complete write if one is lying around.
         await fs.writeText(`${path}.corrupt`, main).catch(() => {});
@@ -129,6 +137,7 @@ export class InkwiseApp {
         // Write then rename, so a crash mid-write can't corrupt the queue.
         await fs.writeText(`${path}.tmp`, text);
         await fs.move(`${path}.tmp`, path);
+        await app.backUp('manifest.json', text);
       },
     });
   }
@@ -136,7 +145,8 @@ export class InkwiseApp {
   async settings(): Promise<Settings> {
     const path = joinPath(await this.privateDir(), 'settings.json');
     try {
-      if (await this.fs.exists(path)) return { ...DEFAULT_SETTINGS, ...JSON.parse(await this.fs.readText(path)) };
+      const text = (await this.fs.exists(path)) ? await this.fs.readText(path) : await this.restore('settings.json', path);
+      if (text !== null) return { ...DEFAULT_SETTINGS, ...JSON.parse(text) };
     } catch {
       // Corrupt settings fall back to defaults.
     }
@@ -148,8 +158,39 @@ export class InkwiseApp {
     next.maxArticles = Math.max(1, Math.min(200, Math.round(Number(next.maxArticles) || DEFAULT_SETTINGS.maxArticles)));
     next.folderName = sanitizeFolder(next.folderName);
     next.tag = next.tag.trim();
-    await this.fs.writeText(joinPath(await this.privateDir(), 'settings.json'), JSON.stringify(next, null, 2));
+    const text = JSON.stringify(next, null, 2);
+    await this.fs.writeText(joinPath(await this.privateDir(), 'settings.json'), text);
+    await this.backUp('settings.json', text);
     return next;
+  }
+
+  /** Copy a private file to BACKUP_DIR. Only when Inkwise may already write there: never asks. */
+  private async backUp(name: string, text: string): Promise<void> {
+    try {
+      if (!(await this.host.hasPermission('plugin.permission.FILE:WRITE'))) return;
+      await this.fs.mkdir(BACKUP_DIR);
+      await this.fs.writeText(joinPath(BACKUP_DIR, name), text);
+    } catch {
+      // The backup only matters after a reinstall; the private copy is what counts.
+    }
+  }
+
+  /**
+   * After a reinstall the private folder is empty: bring a file back from
+   * BACKUP_DIR (if Inkwise may read it) and put it back in place.
+   */
+  private async restore(name: string, privatePath: string): Promise<string | null> {
+    try {
+      if (!(await this.host.hasPermission('plugin.permission.FILE:READ'))) return null;
+      const backup = joinPath(BACKUP_DIR, name);
+      if (!(await this.fs.exists(backup))) return null;
+      const text = await this.fs.readText(backup);
+      if (!parses(text)) return null;
+      await this.fs.writeText(privatePath, text);
+      return text;
+    } catch {
+      return null;
+    }
   }
 
   // ---- token ---------------------------------------------------------------
@@ -158,15 +199,43 @@ export class InkwiseApp {
     return joinPath(await this.privateDir(), 'readwise-token');
   }
 
-  async hasToken(): Promise<boolean> {
-    return !!(await this.token());
+  /** Set by Disconnect, so a token.txt left on the device isn't picked up again. */
+  private async disconnectedPath() {
+    return joinPath(await this.privateDir(), 'disconnected');
   }
 
-  async token(): Promise<string | null> {
+  async hasToken(opts: { ask?: boolean } = {}): Promise<boolean> {
+    return !!(await this.token(opts));
+  }
+
+  /**
+   * The stored token. After a reinstall the private folder starts empty, so
+   * this falls back to MyStyle/Inkwise/token.txt. With `ask` it requests read
+   * access for that; without, it only looks when access is already granted.
+   */
+  async token(opts: { ask?: boolean } = {}): Promise<string | null> {
     const p = await this.tokenPath();
-    if (!(await this.fs.exists(p))) return null;
-    const t = (await this.fs.readText(p)).trim();
-    return t || null;
+    if (await this.fs.exists(p)) {
+      const t = (await this.fs.readText(p)).trim();
+      if (t) return t;
+    }
+    return this.tokenFromFile(!!opts.ask);
+  }
+
+  private async tokenFromFile(ask: boolean): Promise<string | null> {
+    try {
+      if (await this.fs.exists(await this.disconnectedPath())) return null;
+      if (ask) await this.ensure('plugin.permission.FILE:READ');
+      else if (!(await this.host.hasPermission('plugin.permission.FILE:READ'))) return null;
+      if (!(await this.fs.exists(TOKEN_IMPORT_PATH))) return null;
+      const token = cleanToken(await this.fs.readText(TOKEN_IMPORT_PATH));
+      if (!token) return null;
+      // Readwise checks it on first use; a bad one shows up as "token rejected".
+      await this.fs.writeText(await this.tokenPath(), token);
+      return token;
+    } catch {
+      return null;
+    }
   }
 
   /** Validate, then store the token in the private plugin folder. */
@@ -183,35 +252,31 @@ export class InkwiseApp {
     }
     if (!valid) return { ok: false, message: 'Readwise rejected that token. Copy it again from readwise.io/access_token.' };
     await this.fs.writeText(await this.tokenPath(), token);
+    const off = await this.disconnectedPath();
+    if (await this.fs.exists(off)) await this.fs.unlink(off);
     return { ok: true, message: 'Token works. You are connected to Readwise.' };
   }
 
-  /** Import from MyStyle/Inkwise/token.txt, then delete that file. */
+  /**
+   * Import from MyStyle/Inkwise/token.txt. The file stays, so Inkwise can pick
+   * the token up again by itself after a reinstall.
+   */
   async importToken(): Promise<{ ok: boolean; message: string }> {
     await this.ensure('plugin.permission.FILE:READ');
     if (!(await this.fs.exists(TOKEN_IMPORT_PATH))) {
       return { ok: false, message: 'No token file found. Put your token in MyStyle/Inkwise/token.txt and try again.' };
     }
-    const result = await this.setToken(await this.fs.readText(TOKEN_IMPORT_PATH));
-    if (result.ok) {
-      try {
-        await this.ensure('plugin.permission.FILE:DELETE');
-        await this.fs.unlink(TOKEN_IMPORT_PATH);
-        return { ok: true, message: `${result.message} The token file was deleted.` };
-      } catch {
-        return { ok: true, message: `${result.message} Please delete MyStyle/Inkwise/token.txt yourself.` };
-      }
-    }
-    return result;
+    return this.setToken(await this.fs.readText(TOKEN_IMPORT_PATH));
   }
 
   async clearToken(): Promise<void> {
     const p = await this.tokenPath();
     if (await this.fs.exists(p)) await this.fs.unlink(p);
+    await this.fs.writeText(await this.disconnectedPath(), new Date().toISOString());
   }
 
   private async client(): Promise<ReadwiseClient> {
-    const token = await this.token();
+    const token = await this.token({ ask: true });
     if (!token) throw new PermissionError('Connect Readwise first: open Inkwise settings and add your token.');
     return new ReadwiseClient({ token, fetch: this.fetch });
   }
@@ -316,7 +381,7 @@ export class InkwiseApp {
       if (!texts.length && !force) return undefined;
       await this.ensure('plugin.permission.FILE:WRITE');
       const r = markEpub(await this.fs.readBytes(filePath), texts);
-      if (!r) return "Couldn't shade it on the page: the file isn't a readable EPUB.";
+      if (!r) return "Couldn't mark it on the page: the file isn't a readable EPUB.";
       const name = filePath.split('/').pop()!;
       const tmp = joinPath(dirOf(filePath), `.${name}.part`);
       await this.fs.writeBytes(tmp, r.bytes);
@@ -326,9 +391,9 @@ export class InkwiseApp {
         if (d && d.filename === name) d.marked = highlightsKey(texts);
       });
       await this.host.reloadFile();
-      return r.marked || !texts.length ? SHADED : "Couldn't find the passage on the page to shade it.";
+      return r.marked || !texts.length ? SHADED : "Couldn't find the passage on the page to mark it.";
     } catch (err) {
-      return `Couldn't shade it on the page: ${err instanceof Error ? err.message : String(err)}`;
+      return `Couldn't mark it on the page: ${err instanceof Error ? err.message : String(err)}`;
     }
   }
 

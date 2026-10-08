@@ -46,12 +46,14 @@ inkwise sync --target folder --out ./out --limit 5
   - **Sync Reader** in the sidebar (in NOTE and DOC)
   - **Done** in the DOC sidebar
   - **Send highlight** in the DOC text-selection toolbar
+- [ ] **2.3** Upgrade: copy a newer build over the old file and add it again from **Add Plugin** without uninstalling. The version at the bottom of Inkwise settings changes, and the token, settings and permissions are all still there.
+- [ ] **2.4** If an upgrade won't install, uninstall and reinstall, then tap **Sync Reader**. After the permission prompts it syncs without asking for the token again, and your settings are back.
 
 ## Part 3: plugin checks
 
 ### Setup
 - [ ] **3.1** Open Inkwise's settings (the gear in the plugin list). Paste your token and tap **Save token**. Expect an Internet permission prompt. Choose **Always allow**, then expect "Token works."
-- [ ] **3.2** Alternative path: tap **Disconnect**, save the token as `MyStyle/Inkwise/token.txt`, then tap **Import token file**. Expect read and delete permission prompts, then a message that the file was deleted.
+- [ ] **3.2** Alternative path: tap **Disconnect**, save the token as `MyStyle/Inkwise/token.txt`, then tap **Import token file**. Expect a read permission prompt, then "Token works." The file stays in `MyStyle/Inkwise/`.
 
 ### Sync
 - [ ] **3.3** Tap **Sync Reader**. Expect write and read permission prompts (choose Always for both), progress lines, then "Synced N new, 0 updated."
@@ -65,11 +67,11 @@ For each passage below, select it in an Inkwise EPUB and tap **Send highlight**.
 - [ ] **3.8** A sentence with an em dash.
 - [ ] **3.9** A selection that spans two paragraphs.
 - [ ] **3.10** A sentence containing italics or a link.
-- [ ] **3.11** Send highlight opens no screen: the passage turns grey and you're still reading. Handwriting already on the page stays where it was.
-- [ ] **3.11a** Select that passage again and tap Send highlight. A screen opens with the note field and **Delete highlight**. Add a note; it should show in Reader. Then delete it; the shading goes and Reader no longer has it.
-- [ ] **3.11b** Change the font size and margins. The shading should follow the text.
-- [ ] **3.11c** Highlight a passage in Reader on your phone, tap **Sync Reader**, and check the passage is shaded on the Manta.
-- [ ] **3.12** Select only part of a shaded passage and tap Send highlight. It should open the existing highlight, not send a new one.
+- [ ] **3.11** Send highlight opens no screen: the passage gets underlined and you're still reading. Handwriting already on the page stays where it was.
+- [ ] **3.11a** Select that passage again and tap Send highlight. A screen opens with the note field and **Delete highlight**. Add a note; it should show in Reader. Then delete it; the underline goes and Reader no longer has it.
+- [ ] **3.11b** Change the font size and margins. The underline should follow the text.
+- [ ] **3.11c** Highlight a passage in Reader on your phone, tap **Sync Reader**, and check the passage is underlined on the Manta.
+- [ ] **3.12** Select only part of a marked passage and tap Send highlight. It should open the existing highlight, not send a new one.
 - [ ] **3.13** Turn off Wi-Fi and send a highlight. Expect "Saved offline, will send on next sync." Turn Wi-Fi back on and tap **Sync Reader**. The result line should say it sent 1 saved highlight.
 - [ ] **3.14** Select text in a non-Inkwise PDF and tap Send highlight. Expect "This document isn't from Readwise."
 
@@ -91,7 +93,8 @@ These are the open questions only a device can answer. If any of them goes wrong
 | Does `showType: 0` really mean "no popup" for a selection-toolbar button? | Quick send | A blank or "Sending…" screen after each send. |
 | Does Reader accept `DELETE /api/v3/delete/<id>/` for a highlight? | Delete highlight | An error message instead of "Highlight deleted." |
 | Is the handwriting file really `<name>.epub.mark` next to the EPUB? | Done, then sync | Handwriting missing after the article moves to Archive. |
-| Does `reloadFile()` show a rewritten EPUB straight away, and do handwritten marks survive it? | Shading highlights | No shading until the article is closed and reopened, or handwriting that moves. Shading can be turned off in settings. |
+| Does `reloadFile()` show a rewritten EPUB straight away, and do handwritten marks survive it? | Marking highlights | No mark until the article is closed and reopened, or handwriting that moves. Marking can be turned off in settings. |
+| Which highlight styles does the DOC reader draw? A grey background behind words showed nothing on a Manta. | Marking highlights | Run `node scripts/make-highlight-test-epub.mjs`, copy the EPUB to the Manta, and note which of its numbered lines look marked. |
 | Does Reader's tag filter want the tag's display name or its lowercase key? | Sync with a tag set | A tag filter that finds nothing. Try the tag in lowercase. |
 
 ## If something breaks

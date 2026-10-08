@@ -4,7 +4,7 @@ import { strFromU8, unzipSync } from 'fflate';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { epubFilename, type ReaderDocument } from '@inkwise/core';
 import { FakeReadwise, TINY_PNG } from '@inkwise/core/testing';
-import { InkwiseApp, STORAGE_ROOT, TOKEN_IMPORT_PATH, cleanToken, type Host, type Permission } from '../src/services/app';
+import { BACKUP_DIR, InkwiseApp, SHADED, STORAGE_ROOT, TOKEN_IMPORT_PATH, cleanToken, type Host, type Permission } from '../src/services/app';
 import { base64ToBytes, bytesToBase64 } from '../src/services/base64';
 import { MemoryFs } from '../src/services/fs';
 import { HighlightState, needsScreen, quickSend } from '../src/services/quickSend';
@@ -88,13 +88,35 @@ describe('token setup', () => {
     expect(r).toEqual({ ok: false, message: 'No connection to Readwise. Check Wi-Fi and try again.' });
   });
 
-  it('imports from MyStyle/Inkwise/token.txt and deletes the file', async () => {
+  it('imports from MyStyle/Inkwise/token.txt and leaves the file in place', async () => {
     await fs.writeText(TOKEN_IMPORT_PATH, '﻿device-token\r\n');
     const r = await app.importToken();
-    expect(r.ok).toBe(true);
-    expect(r.message).toContain('deleted');
-    expect(await fs.exists(TOKEN_IMPORT_PATH)).toBe(false);
+    expect(r).toEqual({ ok: true, message: 'Token works. You are connected to Readwise.' });
+    expect(await fs.exists(TOKEN_IMPORT_PATH)).toBe(true);
     expect(host.granted.has('plugin.permission.FILE:READ')).toBe(true);
+    expect(host.granted.has('plugin.permission.FILE:DELETE')).toBe(false);
+  });
+
+  it('picks the token up from token.txt by itself after a reinstall', async () => {
+    await fs.writeText(TOKEN_IMPORT_PATH, 'device-token\n');
+    // Without file access it doesn't look, and doesn't ask either.
+    expect(await app.hasToken()).toBe(false);
+    expect(host.requests).toEqual([]);
+    // Sync asks for access, finds the file and carries on.
+    expect(await app.sync(() => {})).toBe('Synced 4 new, 0 updated.');
+    expect(await fs.readText(`${PRIVATE}/readwise-token`)).toBe('device-token');
+    expect(await app.hasToken()).toBe(true);
+  });
+
+  it('stays disconnected after Disconnect even with token.txt around', async () => {
+    await fs.writeText(TOKEN_IMPORT_PATH, 'device-token');
+    await app.importToken();
+    await app.clearToken();
+    expect(await app.hasToken({ ask: true })).toBe(false);
+    expect(await app.sync(() => {})).toBe('Connect Readwise first: open Inkwise settings and add your token.');
+    // Importing again reconnects.
+    expect((await app.importToken()).ok).toBe(true);
+    expect(await app.hasToken()).toBe(true);
   });
 
   it('explains when there is no token file', async () => {
@@ -211,7 +233,7 @@ describe('Send highlight', () => {
     host.selection = 'None of this is new.';
     const r = await app.sendSelection();
     expect(r.status).toBe('sent');
-    expect(r.shading).toBe('Shaded on the page.');
+    expect(r.shading).toBe(SHADED);
     expect(host.reloads).toBe(1);
     const article = strFromU8(unzipSync(await fs.readBytes(path))['OEBPS/article.xhtml']!);
     expect(article).toContain('<span class="rw-hl">None of this is new.</span>');
@@ -240,8 +262,8 @@ describe('Send highlight', () => {
     expect(needsScreen({ status: 'needs_attention', message: '' })).toBe(true);
     expect(needsScreen({ status: 'token_rejected', message: '' })).toBe(true);
     expect(needsScreen({ status: 'sent', message: '', shading: undefined })).toBe(true);
-    expect(needsScreen({ status: 'sent', message: '', shading: 'Shaded on the page.' })).toBe(false);
-    expect(needsScreen({ status: 'queued_offline', message: '', shading: 'Shaded on the page.' })).toBe(false);
+    expect(needsScreen({ status: 'sent', message: '', shading: SHADED })).toBe(false);
+    expect(needsScreen({ status: 'queued_offline', message: '', shading: SHADED })).toBe(false);
   });
 
   it('deleting a highlight removes it in Readwise and clears its shading', async () => {
@@ -362,6 +384,39 @@ describe('Done', () => {
   it("does nothing for documents that aren't from Readwise", async () => {
     host.filePath = `${STORAGE_ROOT}/Document/book.epub`;
     expect(await app.done()).toEqual({ ok: false, message: "This document isn't from Readwise." });
+  });
+});
+
+describe('reinstalling', () => {
+  it('backs up settings and the manifest (not the token) and restores them into an empty private folder', async () => {
+    await connect();
+    host.granted.add('plugin.permission.FILE:WRITE');
+    await app.saveSettings({ maxArticles: 12, tag: 'supernote' });
+    fake.offline = true;
+    const doc = docs[0]!;
+    host.filePath = `${LIBRARY}/${epubFilename(doc)}`;
+    host.selection = 'Words waiting to go out.';
+    await app.sendSelection();
+    const backups = (await fs.listFiles(BACKUP_DIR)).map((f) => f.name).sort();
+    expect(backups).toEqual(['manifest.json', 'settings.json']);
+    for (const name of backups) expect(await fs.readText(`${BACKUP_DIR}/${name}`)).not.toContain('device-token');
+
+    // Uninstall wipes the private folder, and the permissions with it.
+    for (const k of [...fs.files.keys()]) if (k.startsWith(PRIVATE)) fs.files.delete(k);
+    host.granted.clear();
+    const fresh = new InkwiseApp(host, fs, fake.fetch);
+    expect((await fresh.settings()).maxArticles).toBe(30);
+    host.granted.add('plugin.permission.FILE:READ');
+    expect(await fresh.settings()).toMatchObject({ maxArticles: 12, tag: 'supernote' });
+    expect((await fresh.queue()).pending.map((h) => h.text)).toEqual(['Words waiting to go out.']);
+    expect(await fs.exists(`${PRIVATE}/settings.json`)).toBe(true);
+  });
+
+  it('never writes a backup without write access', async () => {
+    await connect();
+    await app.saveSettings({ maxArticles: 12 });
+    expect(await fs.exists(BACKUP_DIR)).toBe(false);
+    expect(host.requests.map((r) => r.permission)).toEqual(['plugin.permission.INTERNET']);
   });
 });
 

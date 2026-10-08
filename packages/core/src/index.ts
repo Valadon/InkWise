@@ -9,3 +9,4 @@ export * from './output.js';
 export * from './sync.js';
 export * from './highlights.js';
 export * from './marks.js';
+export * from './markStyle.js';

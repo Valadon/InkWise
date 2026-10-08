@@ -1,3 +1,4 @@
+import { MARK_STYLE } from './markStyle.js';
 import { highlightHash } from './normalize.js';
 
 /**
@@ -82,7 +83,9 @@ export function emptyManifest(): Manifest {
 
 /** Identifies a set of highlights, to tell whether a file needs re-marking. */
 export function highlightsKey(texts: string[] | undefined): string {
-  return [...new Set((texts ?? []).map((t) => t.trim()).filter(Boolean))].sort().join('\u0000');
+  const list = [...new Set((texts ?? []).map((t) => t.trim()).filter(Boolean))].sort();
+  // The style version is part of the key, so files shaded the old way get redone.
+  return list.length ? [`style ${MARK_STYLE}`, ...list].join('\u0000') : '';
 }
 
 /** Record a highlight's text (and what we know about it) for a document. Returns true if the text was new. */

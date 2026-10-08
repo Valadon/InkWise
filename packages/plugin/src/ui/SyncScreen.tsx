@@ -15,7 +15,8 @@ export function SyncScreen({ app, run, onClose, onSettings }: { app: InkwiseApp;
     setResult(null);
     setLines([]);
     try {
-      if (!(await app.hasToken())) {
+      // After a reinstall this reads the token back from token.txt (asking for file access).
+      if (!(await app.hasToken({ ask: true }))) {
         setNeedsToken(true);
         return;
       }

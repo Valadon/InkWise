@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type { PendingHighlight } from '@inkwise/core';
-import { TOKEN_IMPORT_PATH, type InkwiseApp, type Settings } from '../services/app';
+import { STORAGE_ROOT, TOKEN_IMPORT_PATH, type InkwiseApp, type Settings } from '../services/app';
 import { BUILD } from '../buildInfo';
 import { Button, Choice, Field, Line, Page, Quote, Row, Section, Toggle } from './kit';
 
@@ -67,10 +67,12 @@ export function SettingsScreen({ app, onClose }: { app: InkwiseApp; onClose: () 
           <Button label="Import token file" disabled={busy} onPress={() => run(() => app.importToken(), setTokenMsg)} />
           {connected ? <Button label="Disconnect" disabled={busy} onPress={() => run(async () => {
             await app.clearToken();
-            return { message: 'Token removed from this device.' };
+            return { message: "Token removed. Inkwise won't use token.txt again until you import it." };
           }, setTokenMsg)} /> : null}
         </Row>
-        <Line small>Token file location: {TOKEN_IMPORT_PATH.replace('/storage/emulated/0/', '')}. Inkwise deletes it after importing.</Line>
+        <Line small>
+          Token file location: {TOKEN_IMPORT_PATH.replace(`${STORAGE_ROOT}/`, '')}. Inkwise leaves it there and reads it again by itself after a reinstall.
+        </Line>
         {tokenMsg ? <Line strong>{tokenMsg}</Line> : null}
       </Section>
 
@@ -93,7 +95,7 @@ export function SettingsScreen({ app, onClose }: { app: InkwiseApp; onClose: () 
           onEndEditing={(e) => update({ maxArticles: Number(e.nativeEvent.text) })}
         />
         <Toggle label="Images" value={settings.images} onChange={(images) => update({ images })} />
-        <Toggle label="Shade highlights in articles" value={settings.showHighlights} onChange={(showHighlights) => update({ showHighlights })} />
+        <Toggle label="Mark highlights in articles" value={settings.showHighlights} onChange={(showHighlights) => update({ showHighlights })} />
         <Field label="Folder inside Document" defaultValue={settings.folderName} onEndEditing={(e) => update({ folderName: e.nativeEvent.text })} />
       </Section>
 

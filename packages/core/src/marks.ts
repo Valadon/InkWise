@@ -1,5 +1,6 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { findLoose } from './highlights.js';
+import { HIGHLIGHT_CLASS, HIGHLIGHT_CSS } from './markStyle.js';
 
 /**
  * Shows Readwise highlights inside an Inkwise EPUB. The Supernote plugin SDK
@@ -8,8 +9,8 @@ import { findLoose } from './highlights.js';
  * removed), so pages lay out the same and handwritten marks stay in place.
  */
 
-export const HIGHLIGHT_CLASS = 'rw-hl';
-export const HIGHLIGHT_CSS = `span.${HIGHLIGHT_CLASS} { background-color: #d2d2d2; }\n`;
+/** An Inkwise highlight rule from any version, so an old one can be replaced. */
+const HIGHLIGHT_RULE = new RegExp(`^span\\.${HIGHLIGHT_CLASS}\\s*\\{[^}]*\\}[ \\t]*\\n?`, 'gm');
 
 const OPEN_MARK = `<span class="${HIGHLIGHT_CLASS}">`;
 
@@ -247,7 +248,9 @@ export function markEpub(bytes: Uint8Array, highlights: string[]): { bytes: Uint
 
   for (const name of Object.keys(files).filter((n) => n.endsWith('.css'))) {
     const css = strFromU8(files[name]!);
-    if (!css.includes(`span.${HIGHLIGHT_CLASS}`)) files[name] = strToU8(css + (css.endsWith('\n') ? '' : '\n') + HIGHLIGHT_CSS);
+    if (css.includes(HIGHLIGHT_CSS)) continue;
+    const rest = css.replace(HIGHLIGHT_RULE, '');
+    files[name] = strToU8(rest + (rest === '' || rest.endsWith('\n') ? '' : '\n') + HIGHLIGHT_CSS);
   }
 
   // The mimetype entry must come first and be stored uncompressed.

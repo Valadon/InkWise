@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { strFromU8, unzipSync } from 'fflate';
-import { MemoryManifestStore, MemoryOutput, ReadwiseClient, epubFilename, sendHighlight, syncReader } from '../src/index.js';
+import { MemoryManifestStore, MemoryOutput, ReadwiseClient, epubFilename, highlightsKey, sendHighlight, syncReader } from '../src/index.js';
 import { FakeReadwise, TINY_GIF, TINY_PNG } from '../src/testing/fake-readwise.js';
 import { loadFixtures, noSleep } from './helpers.js';
 
@@ -77,6 +77,19 @@ describe('syncReader', () => {
     expect(third.updated).toBe(1);
     expect(articleOf()).toContain(`<span class="rw-hl">${second}</span>`);
     expect(manifest.manifest.docHighlights[doc.id]).toHaveLength(2);
+  });
+
+  it('re-shades files that were shaded in an older style', async () => {
+    const { fake, manifest, deps } = setup();
+    const doc = fake.documents.find((d) => d.id.includes('longform'))!;
+    const at = '2026-10-08T02:00:00Z';
+    fake.highlights.push({ id: 'hlA', parent_id: doc.id, content: 'None of this is new.', notes: '', tags: [], createdAt: at, updatedAt: at });
+    await syncReader(deps);
+    // What a build before the style change recorded.
+    manifest.manifest.documents[doc.id]!.marked = 'None of this is new.';
+    const again = await syncReader(deps);
+    expect(again.updated).toBe(1);
+    expect(manifest.manifest.documents[doc.id]!.marked).toBe(highlightsKey(['None of this is new.']));
   });
 
   it('leaves EPUBs plain when highlights are turned off', async () => {
