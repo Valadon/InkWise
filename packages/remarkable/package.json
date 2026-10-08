@@ -1,0 +1,19 @@
+{
+  "name": "@inkwise/remarkable",
+  "version": "0.1.0",
+  "description": "Inkwise for reMarkable tablets (reManager / xovi / AppLoad). Reads highlights out of xochitl's .rm page files.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@inkwise/core": "0.1.0",
+    "fflate": "^0.8.2"
+  }
+}

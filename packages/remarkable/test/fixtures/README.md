@@ -1,0 +1,1 @@
+These `.rm` files come from the test data of [rmscene](https://github.com/ricklupton/rmscene) (MIT, see RMSCENE-LICENSE). They are pages exported from reMarkable tablets, not anyone's personal documents.

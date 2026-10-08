@@ -5,11 +5,12 @@
   "description": "Readwise Reader for Supernote: Reader queue to EPUB, highlights back to Readwise.",
   "workspaces": [
     "packages/core",
-    "packages/cli"
+    "packages/cli",
+    "packages/remarkable"
   ],
   "scripts": {
     "build": "npm run build -w @inkwise/core && npm run build -w @inkwise/cli",
-    "typecheck": "tsc -b packages/core packages/cli",
+    "typecheck": "tsc -b packages/core packages/cli packages/remarkable",
     "test": "vitest run",
     "epubcheck": "node scripts/epubcheck-fixtures.mjs"
   },
