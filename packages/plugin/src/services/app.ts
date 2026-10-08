@@ -11,6 +11,8 @@ import {
   syncReader,
   textManifestStore,
   updateManifest,
+  highlightsKey,
+  markEpub,
   type FetchLike,
   type ManifestStore,
   type OutputAdapter,
@@ -18,7 +20,7 @@ import {
   type ReviewAction,
   type SendResult,
 } from '@inkwise/core';
-import { joinPath, type DeviceFs } from './fs';
+import { dirOf, joinPath, type DeviceFs } from './fs';
 
 /** What the plugin needs from the Supernote host (wrapped around sn-plugin-lib in host.ts). */
 export interface Host {
@@ -28,6 +30,8 @@ export interface Host {
   /** The DOC app's current selection. */
   selectedText(): Promise<{ ok: true; text: string } | { ok: false; error: string }>;
   currentFilePath(): Promise<string | null>;
+  /** Ask the DOC app to re-read the open file after Inkwise changed it. */
+  reloadFile(): Promise<void>;
 }
 
 export type Permission =
@@ -55,6 +59,8 @@ export interface Settings {
   afterArchive: AfterArchive;
   /** Tidy up EPUBs whose documents left the queue on each sync. */
   removeMissing: boolean;
+  /** Shade sent highlights (and ones made in Reader) in the EPUBs. */
+  showHighlights: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -65,6 +71,7 @@ export const DEFAULT_SETTINGS: Settings = {
   folderName: 'Inkwise',
   afterArchive: 'move',
   removeMissing: false,
+  showHighlights: true,
 };
 
 export const STORAGE_ROOT = '/storage/emulated/0';
@@ -242,6 +249,7 @@ export class InkwiseApp {
           imageBudgetBytes: 4 * 1024 * 1024,
           removeMissing: settings.removeMissing,
           removeMode: 'archive-folder',
+          showHighlights: settings.showHighlights,
         },
       );
       return result.summary;
@@ -251,7 +259,7 @@ export class InkwiseApp {
   }
 
   /** Send highlight button: reads the selection and current file from the DOC app. */
-  async sendSelection(): Promise<SendResult & { selection?: string }> {
+  async sendSelection(): Promise<SendResult & { selection?: string; shading?: string }> {
     const sel = await this.host.selectedText();
     if (!sel.ok || !sel.text.trim()) {
       return { status: 'empty', message: 'Select some text first, then tap Send highlight.' };
@@ -276,7 +284,41 @@ export class InkwiseApp {
       text: sel.text,
       readIdentifier: (p) => this.readIdentifier(p),
     });
-    return { ...result, selection: sel.text };
+    let shading: string | undefined;
+    if (result.docId && (result.status === 'sent' || result.status === 'queued_offline' || result.status === 'duplicate')) {
+      shading = await this.shadeOpenFile(filePath, result.docId);
+    }
+    return { ...result, selection: sel.text, shading };
+  }
+
+  /**
+   * Rewrite the open EPUB so its highlights show, then have the DOC app reload
+   * it. The SDK can't draw a highlight on a DOC page, so this is the way to make
+   * a sent highlight visible. Returns a line for the screen, or undefined when
+   * shading is off or doesn't apply.
+   */
+  async shadeOpenFile(filePath: string, docId: string): Promise<string | undefined> {
+    if (!/\.epub$/i.test(filePath) || !(await this.settings()).showHighlights) return undefined;
+    try {
+      const store = await this.manifest();
+      const texts = (await store.load()).docHighlights[docId] ?? [];
+      if (!texts.length) return undefined;
+      await this.ensure('plugin.permission.FILE:WRITE');
+      const r = markEpub(await this.fs.readBytes(filePath), texts);
+      if (!r) return "Couldn't shade it on the page: the file isn't a readable EPUB.";
+      const name = filePath.split('/').pop()!;
+      const tmp = joinPath(dirOf(filePath), `.${name}.part`);
+      await this.fs.writeBytes(tmp, r.bytes);
+      await this.fs.move(tmp, filePath);
+      await updateManifest(store, (m) => {
+        const d = m.documents[docId];
+        if (d && d.filename === name) d.marked = highlightsKey(texts);
+      });
+      await this.host.reloadFile();
+      return r.marked ? 'Shaded on the page.' : "Couldn't find the passage on the page to shade it.";
+    } catch (err) {
+      return `Couldn't shade it on the page: ${err instanceof Error ? err.message : String(err)}`;
+    }
   }
 
   async addNote(args: { docId: string; text: string; note: string; highlightId?: string }) {

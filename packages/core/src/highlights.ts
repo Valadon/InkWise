@@ -1,6 +1,6 @@
 import { Parser } from 'htmlparser2';
 import { idFromFilename } from './epub.js';
-import { docIdForFilename, withManifestLock, type Manifest, type ManifestStore, type PendingHighlight } from './manifest.js';
+import { addDocHighlight, docIdForFilename, withManifestLock, type Manifest, type ManifestStore, type PendingHighlight } from './manifest.js';
 import { highlightHash, highlightVariants, normalizeSelection, straighten } from './normalize.js';
 import { NetworkError, ReadwiseClient, ReadwiseError } from './readwise.js';
 
@@ -180,6 +180,7 @@ async function finish(
   switch (outcome.kind) {
     case 'sent':
       manifest.sentHighlightHashes.push(hash);
+      addDocHighlight(manifest, p.docId, outcome.sentText ?? p.text);
       await store.save(manifest);
       return {
         status: 'sent',
@@ -192,6 +193,7 @@ async function finish(
     case 'retryable':
       p.lastError = outcome.error;
       manifest.pendingHighlights.push(p);
+      addDocHighlight(manifest, p.docId, p.text);
       await store.save(manifest);
       return { status: 'queued_offline', message: 'Saved offline, will send on next sync.', docId: p.docId };
     case 'auth':
@@ -284,6 +286,7 @@ export async function flushPending(opts: {
     const hash = highlightHash(p.docId, p.text);
     if (outcome.kind === 'sent') {
       if (!manifest.sentHighlightHashes.includes(hash)) manifest.sentHighlightHashes.push(hash);
+      addDocHighlight(manifest, p.docId, outcome.sentText);
       result.sent++;
       continue;
     }
@@ -487,15 +490,23 @@ export function locateInHtml(selection: string, html: string): string | null {
 }
 
 export function locateInText(selection: string, source: string): string | null {
-  const needle = foldForMatch(selection).text;
-  if (!needle) return null;
+  const range = findLoose(selection, source);
+  return range ? source.slice(range.start, range.end).trim() : null;
+}
+
+/**
+ * Where `needle` sits in `source` under the same loose comparison, as source
+ * offsets (`end` exclusive). Searches from `from` (a source offset).
+ */
+export function findLoose(needle: string, source: string, from = 0): { start: number; end: number } | null {
+  const n = foldForMatch(needle).text;
+  if (!n) return null;
   const folded = foldForMatch(source);
-  const at = folded.text.indexOf(needle);
+  let fromFolded = folded.map.findIndex((i) => i >= from);
+  if (fromFolded === -1) return null;
+  const at = folded.text.indexOf(n, fromFolded);
   if (at === -1) return null;
-  const start = folded.map[at]!;
-  const endFolded = at + needle.length - 1;
-  const end = folded.map[endFolded]! + 1;
-  return source.slice(start, end).trim();
+  return { start: folded.map[at]!, end: folded.map[at + n.length - 1]! + 1 };
 }
 
 /** Lowercase, straighten, collapse whitespace; `map[i]` is the source index of folded char i. */

@@ -31,6 +31,16 @@ for (const name of fixtureDirs.flatMap((dir) => readdirSync(dir).filter((f) => f
   }
 }
 
+// One EPUB with shaded highlights, including one that spans two paragraphs.
+{
+  const doc = JSON.parse(readFileSync(join(root, 'fixtures', 'documents', 'longform.json'), 'utf8'));
+  const highlights = ['None of this is new.', 'Attention is the rarest and purest form of generosity. Simone Weil wrote that'];
+  const epub = buildEpub(doc, { images, highlights, modified: new Date('2026-10-08T00:00:00Z') });
+  const file = join(out, `highlights-${epub.filename}`);
+  writeFileSync(file, epub.bytes);
+  files.push(file);
+}
+
 let failed = 0;
 for (const file of files) {
   try {

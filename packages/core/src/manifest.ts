@@ -16,6 +16,8 @@ export interface ManifestDocument {
   author?: string | null;
   sourceUrl?: string | null;
   syncedAt?: string;
+  /** Which highlights the file on disk shows (see `highlightsKey`). */
+  marked?: string;
 }
 
 export type PendingState = 'pending' | 'needs_attention';
@@ -44,6 +46,10 @@ export interface Manifest {
   pendingHighlights: PendingHighlight[];
   sentHighlightHashes: string[];
   pendingArchives?: PendingArchive[];
+  /** Highlight texts per Reader document, from Readwise and from this device. */
+  docHighlights: Record<string, string[]>;
+  /** When Readwise highlights were last fetched. */
+  highlightsSyncedAt: string | null;
 }
 
 export interface ManifestStore {
@@ -59,7 +65,24 @@ export function emptyManifest(): Manifest {
     pendingHighlights: [],
     sentHighlightHashes: [],
     pendingArchives: [],
+    docHighlights: {},
+    highlightsSyncedAt: null,
   };
+}
+
+/** Identifies a set of highlights, to tell whether a file needs re-marking. */
+export function highlightsKey(texts: string[] | undefined): string {
+  return [...new Set((texts ?? []).map((t) => t.trim()).filter(Boolean))].sort().join('\u0000');
+}
+
+/** Record a highlight's text for a document. Returns true if it was new. */
+export function addDocHighlight(m: Manifest, docId: string, text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  const list = (m.docHighlights[docId] ??= []);
+  if (list.includes(t)) return false;
+  list.push(t);
+  return true;
 }
 
 /** Parse a stored manifest, tolerating missing fields and garbage (a corrupt file must not block sync). */
@@ -86,6 +109,7 @@ export function parseManifest(json: string | null | undefined): Manifest {
           author: d.author,
           sourceUrl: d.sourceUrl,
           syncedAt: d.syncedAt,
+          marked: typeof d.marked === 'string' ? d.marked : undefined,
         };
       }
     }
@@ -116,6 +140,12 @@ export function parseManifest(json: string | null | undefined): Manifest {
         lastError: a.lastError,
       }));
   }
+  if (raw.docHighlights && typeof raw.docHighlights === 'object') {
+    for (const [id, list] of Object.entries<any>(raw.docHighlights)) {
+      if (Array.isArray(list)) m.docHighlights[id] = list.filter((x: unknown) => typeof x === 'string');
+    }
+  }
+  m.highlightsSyncedAt = typeof raw.highlightsSyncedAt === 'string' ? raw.highlightsSyncedAt : null;
   return m;
 }
 

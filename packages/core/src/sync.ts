@@ -2,7 +2,7 @@ import { buildEpub, epubFilename, idFromFilename } from './epub.js';
 import { flushPending, type FlushResult } from './highlights.js';
 import { collectImages, type ImageProcessor } from './images.js';
 import { extractImageUrls } from './html.js';
-import { updateManifest, withManifestLock, type Manifest, type ManifestDocument, type ManifestStore } from './manifest.js';
+import { addDocHighlight, highlightsKey, updateManifest, withManifestLock, type Manifest, type ManifestDocument, type ManifestStore } from './manifest.js';
 import type { OutputAdapter } from './output.js';
 import { NetworkError, ReadwiseClient, ReadwiseError } from './readwise.js';
 import type { FetchLike, ReaderDocument } from './types.js';
@@ -25,6 +25,8 @@ export interface SyncOptions {
   force?: boolean;
   /** Per-EPUB image budget in bytes. */
   imageBudgetBytes?: number;
+  /** Shade Readwise highlights in the EPUBs. Default true. */
+  showHighlights?: boolean;
 }
 
 export interface SyncDeps {
@@ -96,6 +98,9 @@ export async function syncReader(deps: SyncDeps, opts: SyncOptions = {}): Promis
   });
   say(`Found ${docs.length} ${docs.length === 1 ? 'article' : 'articles'}.`);
 
+  const showHighlights = opts.showHighlights ?? true;
+  if (showHighlights && docs.length) await pullHighlights(deps, manifest, docs, opts, warnings, say, now);
+
   const existing = await deps.output.list();
   const existingNames = new Set(existing.map((f) => f.name));
   /** Duplicate guard: whatever the title, a file carrying `__<id>` means we already have it. */
@@ -107,7 +112,7 @@ export async function syncReader(deps: SyncDeps, opts: SyncOptions = {}): Promis
 
   const items: SyncItemResult[] = [];
   let written = 0;
-  const toWrite = docs.filter((d) => needsWrite(d, manifest, existingById, opts.force));
+  const toWrite = docs.filter((d) => needsWrite(d, manifest, existingById, opts.force, showHighlights));
   for (const doc of docs) {
     const title = doc.title?.trim() || 'Untitled';
     const filename = epubFilename(doc);
@@ -149,7 +154,8 @@ export async function syncReader(deps: SyncDeps, opts: SyncOptions = {}): Promis
           });
         }
       }
-      const epub = buildEpub(doc, { images, includeImages, modified: now() });
+      const highlights = showHighlights ? manifest.docHighlights[doc.id] : undefined;
+      const epub = buildEpub(doc, { images, includeImages, modified: now(), highlights });
       const isUpdate = !!onDisk || !!entry;
       if (!opts.dryRun) {
         await deps.output.put(epub.filename, epub.bytes);
@@ -166,6 +172,7 @@ export async function syncReader(deps: SyncDeps, opts: SyncOptions = {}): Promis
           author: doc.author,
           sourceUrl: doc.source_url,
           syncedAt: now().toISOString(),
+          marked: highlightsKey(highlights),
         });
       }
       items.push({ id: doc.id, title, filename: epub.filename, action: isUpdate ? 'updated' : 'added' });
@@ -234,13 +241,53 @@ function needsWrite(
   manifest: Manifest,
   existingById: Map<string, string>,
   force?: boolean,
+  showHighlights = true,
 ): boolean {
   if (force) return true;
   const entry = manifest.documents[doc.id];
   const onDisk = existingById.get(doc.id);
   if (!onDisk) return true;
   if (!entry) return false; // adopt the other tool's copy
+  if (showHighlights && (entry.marked ?? '') !== highlightsKey(manifest.docHighlights[doc.id])) return true;
   return entry.updatedAt !== doc.updated_at || entry.filename !== onDisk;
+}
+
+/**
+ * Fetch highlights made in Reader (on the phone, the web, anywhere) for the
+ * documents being synced, so the EPUBs can show them. Only highlights changed
+ * since the last fetch are requested; the first fetch starts from the oldest
+ * document in the queue, since no highlight can be older than its document.
+ */
+async function pullHighlights(
+  deps: SyncDeps,
+  manifest: Manifest,
+  docs: ReaderDocument[],
+  opts: SyncOptions,
+  warnings: string[],
+  say: (m: string) => void,
+  now: () => Date,
+): Promise<void> {
+  // Reader's clock and the device's can disagree; overlap a little.
+  const startedAt = new Date(now().getTime() - 5 * 60 * 1000).toISOString();
+  const oldest = docs.map((d) => d.created_at).filter(Boolean).sort()[0];
+  const updatedAfter = manifest.highlightsSyncedAt ?? oldest;
+  say('Checking for new highlights…');
+  let found;
+  try {
+    found = await deps.client.listHighlights({ updatedAfter });
+  } catch (err) {
+    if (err instanceof NetworkError) throw err;
+    warnings.push(`Couldn't fetch highlights from Readwise: ${err instanceof Error ? err.message : String(err)}`);
+    return;
+  }
+  const wanted = new Set(docs.map((d) => d.id));
+  const relevant = found.filter((h) => wanted.has(h.parentId));
+  for (const h of relevant) addDocHighlight(manifest, h.parentId, h.text);
+  if (opts.dryRun) return;
+  await updateManifest(deps.manifest, (m) => {
+    for (const h of relevant) addDocHighlight(m, h.parentId, h.text);
+    m.highlightsSyncedAt = startedAt;
+  });
 }
 
 export function summarize(r: Omit<SyncResult, 'summary'>, dryRun = false): string {

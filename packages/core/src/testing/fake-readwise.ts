@@ -17,6 +17,8 @@ export interface FakeHighlight {
   notes: string;
   tags: string[];
   saved_using?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface FakeReadwiseOptions {
@@ -48,6 +50,8 @@ export class FakeReadwise {
   /** Force a status for the next request to a path prefix, e.g. { '/api/v3/save/': 500 }. */
   failNext: Record<string, number> = {};
   private nextId = 1;
+  /** Timestamp source for highlights; tests can pin it. */
+  clock: () => string = () => new Date().toISOString();
   private readonly pageSize: number;
 
   constructor(opts: FakeReadwiseOptions = {}) {
@@ -98,6 +102,7 @@ export class FakeReadwise {
         if (extra.length) return respond(400, { detail: `Highlights only accept notes and tags.` });
         if (typeof body?.notes === 'string') hl.notes = body.notes;
         if (Array.isArray(body?.tags)) hl.tags = body.tags;
+        hl.updatedAt = this.clock();
         return respond(200, { id: hl.id, url: `https://read.readwise.io/read/${hl.id}` });
       }
       const doc = this.documents.find((d) => d.id === targetId);
@@ -110,7 +115,22 @@ export class FakeReadwise {
   };
 
   private list(q: Record<string, string[]>) {
-    let docs = [...this.documents];
+    // Reader lists highlights alongside documents; filters below apply to both.
+    const hl = this.highlights.map((h) => ({
+      id: h.id,
+      url: `https://read.readwise.io/read/${h.id}`,
+      source_url: null,
+      title: null,
+      author: null,
+      category: 'highlight',
+      location: null,
+      created_at: h.createdAt,
+      updated_at: h.updatedAt,
+      parent_id: h.parent_id,
+      content: h.content,
+      notes: h.notes,
+    })) as ReaderDocument[];
+    let docs = [...this.documents, ...hl];
     const id = q.id?.[0];
     if (id) docs = docs.filter((d) => d.id === id);
     const location = q.location?.[0];
@@ -120,22 +140,6 @@ export class FakeReadwise {
     for (const tag of q.tag ?? []) docs = docs.filter((d) => d.tags && Object.keys(d.tags).includes(tag));
     const updatedAfter = q.updatedAfter?.[0];
     if (updatedAfter) docs = docs.filter((d) => d.updated_at > updatedAfter);
-    // Reader lists highlights alongside documents unless filtered; mimic that.
-    const hl = this.highlights.map((h) => ({
-      id: h.id,
-      url: `https://read.readwise.io/read/${h.id}`,
-      source_url: null,
-      title: null,
-      author: null,
-      category: 'highlight',
-      location: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      parent_id: h.parent_id,
-      content: h.content,
-      notes: h.notes,
-    })) as ReaderDocument[];
-    if (!category && !id && !location) docs = docs.concat(hl);
 
     const limit = Math.min(Number(q.limit?.[0] ?? this.pageSize), this.pageSize);
     const start = Number(q.pageCursor?.[0] ?? 0);
@@ -171,6 +175,8 @@ export class FakeReadwise {
         notes: body.notes ?? '',
         tags: body.tags ?? [],
         saved_using: body.saved_using,
+        createdAt: this.clock(),
+        updatedAt: this.clock(),
       });
       return respond(201, { id, url: `https://read.readwise.io/read/${id}` });
     }

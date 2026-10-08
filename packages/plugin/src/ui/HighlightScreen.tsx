@@ -7,7 +7,7 @@ import { usePressAction } from './usePress';
 const PREVIEW_CHARS = 280;
 
 export function HighlightScreen({ app, run, onClose, onSettings }: { app: InkwiseApp; run: number; onClose: () => void; onSettings: () => void }) {
-  const [result, setResult] = useState<(SendResult & { selection?: string }) | null>(null);
+  const [result, setResult] = useState<(SendResult & { selection?: string; shading?: string }) | null>(null);
   const [note, setNote] = useState('');
   const [noteResult, setNoteResult] = useState<string | null>(null);
   const [savingNote, setSavingNote] = useState(false);
@@ -43,6 +43,7 @@ export function HighlightScreen({ app, run, onClose, onSettings }: { app: Inkwis
       <Section>
         {text ? <Quote>{text.length > PREVIEW_CHARS ? `${text.slice(0, PREVIEW_CHARS)}…` : text}</Quote> : null}
         <Line strong>{result ? result.message : 'Sending…'}</Line>
+        {result?.shading ? <Line small>{result.shading}</Line> : null}
         {result?.status === 'needs_attention' ? (
           <Line small>You can fix the text or send it as a standalone highlight from Inkwise settings.</Line>
         ) : null}

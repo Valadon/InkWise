@@ -43,6 +43,10 @@ export const supernoteHost: Host = {
       return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
     }
   },
+  async reloadFile() {
+    const r = asResponse<unknown>(await PluginCommAPI.reloadFile());
+    if (!r.success) throw new Error(r.error?.message ?? 'The Supernote would not reload the file.');
+  },
   async currentFilePath() {
     try {
       const r = asResponse<string>(await PluginCommAPI.getCurrentFilePath());

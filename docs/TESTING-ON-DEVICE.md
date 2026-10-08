@@ -66,6 +66,8 @@ For each passage below, select it in an Inkwise EPUB and tap **Send highlight**.
 - [ ] **3.9** A selection that spans two paragraphs.
 - [ ] **3.10** A sentence containing italics or a link.
 - [ ] **3.11** Add a note from the highlight screen. It should show in Reader.
+- [ ] **3.11b** After Send highlight, the screen says "Shaded on the page." and the passage shows shaded once you close Inkwise. Handwriting already on the page stays where it was.
+- [ ] **3.11c** Highlight a passage in Reader on your phone, tap **Sync Reader**, and check the passage is shaded on the Manta.
 - [ ] **3.12** Send the same passage twice. The second time should say "Already sent this highlight."
 - [ ] **3.13** Turn off Wi-Fi and send a highlight. Expect "Saved offline, will send on next sync." Turn Wi-Fi back on and tap **Sync Reader**. The result line should say it sent 1 saved highlight.
 - [ ] **3.14** Select text in a non-Inkwise PDF and tap Send highlight. Expect "This document isn't from Readwise."
@@ -85,6 +87,7 @@ These are the open questions only a device can answer. If any of them goes wrong
 | Does the host allow `fetch` once Internet is granted? | Sync, highlights | "No connection to Readwise" even though Wi-Fi works. |
 | Do the button icons render? | Looks only | Blank icons. |
 | Does reopening the plugin view from a second button press re-run the action? | All buttons | Pressing Sync twice should sync twice. |
+| Does `reloadFile()` show a rewritten EPUB straight away, and do handwritten marks survive it? | Shading highlights | No shading until the article is closed and reopened, or handwriting that moves. Shading can be turned off in settings. |
 | Does Reader's tag filter want the tag's display name or its lowercase key? | Sync with a tag set | A tag filter that finds nothing. Try the tag in lowercase. |
 
 ## If something breaks

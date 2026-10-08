@@ -40,6 +40,10 @@ class FakeHost implements Host {
   async currentFilePath() {
     return this.filePath;
   }
+  reloads = 0;
+  async reloadFile() {
+    this.reloads++;
+  }
 }
 
 let fake: FakeReadwise;
@@ -198,6 +202,30 @@ describe('Send highlight', () => {
     fake.offline = false;
     expect(await app.sync(() => {})).toBe('Synced 0 new, 0 updated. Sent 1 saved highlight.');
     expect(fake.highlights[0]).toMatchObject({ content: 'None of this is new.', notes: 'queued note' });
+  });
+
+  it('shades a sent highlight in the open EPUB and reloads it', async () => {
+    const path = `${LIBRARY}/${epubFilename(longform)}`;
+    host.filePath = path;
+    host.selection = 'None of this is new.';
+    const r = await app.sendSelection();
+    expect(r.status).toBe('sent');
+    expect(r.shading).toBe('Shaded on the page.');
+    expect(host.reloads).toBe(1);
+    const article = strFromU8(unzipSync(await fs.readBytes(path))['OEBPS/article.xhtml']!);
+    expect(article).toContain('<span class="rw-hl">None of this is new.</span>');
+    // The next sync sees the file already shows it and leaves it alone.
+    expect(await app.sync(() => {})).toBe('Synced 0 new, 0 updated.');
+  });
+
+  it('leaves the file alone when shading is off', async () => {
+    await app.saveSettings({ showHighlights: false });
+    host.filePath = `${LIBRARY}/${epubFilename(longform)}`;
+    host.selection = 'None of this is new.';
+    const r = await app.sendSelection();
+    expect(r.status).toBe('sent');
+    expect(r.shading).toBeUndefined();
+    expect(host.reloads).toBe(0);
   });
 
   it("refuses documents that aren't from Readwise", async () => {

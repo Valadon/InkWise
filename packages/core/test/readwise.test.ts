@@ -27,7 +27,7 @@ describe('ReadwiseClient', () => {
 
   it('follows nextPageCursor and filters out highlights', async () => {
     const { fake, client } = setup({ pageSize: 1 });
-    fake.highlights.push({ id: 'hlX', parent_id: loadFixtures()[0]!.id, content: 'x', notes: '', tags: [] });
+    fake.highlights.push({ id: 'hlX', parent_id: loadFixtures()[0]!.id, content: 'x', notes: '', tags: [], createdAt: '2026-10-08T00:00:00Z', updatedAt: '2026-10-08T00:00:00Z' });
     const docs = await client.listDocuments({ location: 'later', category: 'article', withHtmlContent: true });
     expect(docs.map((d) => d.id).sort()).toEqual(loadFixtures().map((d) => d.id).sort());
     expect(docs.every((d) => d.html_content)).toBe(true);

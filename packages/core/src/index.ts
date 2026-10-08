@@ -8,3 +8,4 @@ export * from './manifest.js';
 export * from './output.js';
 export * from './sync.js';
 export * from './highlights.js';
+export * from './marks.js';

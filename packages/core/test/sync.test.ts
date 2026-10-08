@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { strFromU8, unzipSync } from 'fflate';
 import { MemoryManifestStore, MemoryOutput, ReadwiseClient, epubFilename, sendHighlight, syncReader } from '../src/index.js';
 import { FakeReadwise, TINY_GIF, TINY_PNG } from '../src/testing/fake-readwise.js';
 import { loadFixtures, noSleep } from './helpers.js';
@@ -51,6 +52,40 @@ describe('syncReader', () => {
     expect(r.added).toBe(4);
     expect(manifest.manifest.pendingHighlights).toHaveLength(1);
     expect(Object.keys(manifest.manifest.documents)).toHaveLength(4);
+  });
+
+  it('shades highlights made in Reader, and re-marks when new ones arrive', async () => {
+    const { fake, output, manifest, deps } = setup();
+    const doc = fake.documents.find((d) => d.id.includes('longform'))!;
+    const articleOf = () => {
+      const bytes = output.files.get(epubFilename(doc))!;
+      return strFromU8(unzipSync(bytes)['OEBPS/article.xhtml']!);
+    };
+    const at = '2026-10-08T02:00:00Z';
+    fake.highlights.push({ id: 'hlA', parent_id: doc.id, content: 'None of this is new.', notes: '', tags: [], createdAt: at, updatedAt: at });
+    await syncReader(deps);
+    expect(articleOf()).toContain('<span class="rw-hl">None of this is new.</span>');
+
+    const again = await syncReader(deps);
+    expect(again.updated).toBe(0);
+
+    const later = '2026-10-08T04:00:00Z';
+    const second = 'Attention is the rarest and purest form of generosity.';
+    expect(doc.html_content).toContain(second);
+    fake.highlights.push({ id: 'hlB', parent_id: doc.id, content: second, notes: '', tags: [], createdAt: later, updatedAt: later });
+    const third = await syncReader({ ...deps, now: () => new Date('2026-10-08T05:00:00Z') });
+    expect(third.updated).toBe(1);
+    expect(articleOf()).toContain(`<span class="rw-hl">${second}</span>`);
+    expect(manifest.manifest.docHighlights[doc.id]).toHaveLength(2);
+  });
+
+  it('leaves EPUBs plain when highlights are turned off', async () => {
+    const { fake, output, deps } = setup();
+    const doc = fake.documents[0]!;
+    fake.highlights.push({ id: 'hlA', parent_id: doc.id, content: 'x', notes: '', tags: [], createdAt: '2026-10-08T00:00:00Z', updatedAt: '2026-10-08T00:00:00Z' });
+    await syncReader(deps, { showHighlights: false });
+    expect(fake.requests.some((r) => r.url.includes('category=highlight'))).toBe(false);
+    expect(strFromU8(unzipSync(output.files.get(epubFilename(doc))!)['OEBPS/article.xhtml']!)).not.toContain('rw-hl');
   });
 
   it('is idempotent and picks up updates', async () => {

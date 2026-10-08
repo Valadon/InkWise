@@ -56,6 +56,13 @@ export interface CreateHighlightInput {
   tags?: string[];
 }
 
+export interface ReaderHighlight {
+  id: string;
+  parentId: string;
+  text: string;
+  updatedAt: string;
+}
+
 export interface CreateHighlightResult {
   id: string;
   url?: string;
@@ -122,6 +129,31 @@ export class ReadwiseClient {
         if (doc.parent_id) continue;
         out.push(doc);
         if (opts.limit && out.length >= opts.limit) return out;
+      }
+      cursor = page.nextPageCursor ?? null;
+    } while (cursor);
+    return out;
+  }
+
+  /**
+   * Highlights in the account, optionally only those changed after a time.
+   * Each comes back as a Reader item whose `parent_id` is its document.
+   */
+  async listHighlights(opts: { updatedAfter?: string } = {}): Promise<ReaderHighlight[]> {
+    const out: ReaderHighlight[] = [];
+    let cursor: string | null = null;
+    do {
+      const params = new URLSearchParamsLite();
+      params.set('category', 'highlight');
+      if (opts.updatedAfter) params.set('updatedAfter', opts.updatedAfter);
+      params.set('limit', '100');
+      if (cursor) params.set('pageCursor', cursor);
+      const res = await this.request('GET', `/api/v3/list/?${params.toString()}`);
+      const page = (await res.json()) as ListResponse;
+      for (const item of page.results ?? []) {
+        if (item.parent_id && typeof item.content === 'string' && item.content.trim()) {
+          out.push({ id: item.id, parentId: item.parent_id, text: item.content, updatedAt: item.updated_at });
+        }
       }
       cursor = page.nextPageCursor ?? null;
     } while (cursor);
