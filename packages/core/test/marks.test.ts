@@ -78,7 +78,8 @@ describe('markEpub', () => {
       strFromU8(unzipSync(markEpub(plain.bytes, ['None of this is new.'], style)!.bytes)['OEBPS/style.css']!);
     expect(cssFor('bold')).toContain('span.rw-hl { font-weight: bold; }');
     expect(cssFor('bold')).not.toContain('.rw-hl-block');
-    expect(cssFor('paragraph')).toContain('.rw-hl-block { background-color: #d2d2d2; }');
+    expect(cssFor('paragraph')).toContain('p.rw-hl-block { background-color: #d2d2d2; }');
+    expect(cssFor('paragraph')).toContain('li.rw-hl-block { background-color: #d2d2d2; }');
     expect(cssFor('paragraph')).not.toContain('span.rw-hl');
     expect(cssFor('both')).toContain(highlightCss('both'));
   });
@@ -89,13 +90,14 @@ describe('markEpub', () => {
     const css = strFromU8(files['OEBPS/style.css']!);
     // What builds 0.2.8 and 0.2.9 wrote, in the middle of the stylesheet.
     files['OEBPS/style.css'] = strToU8(
-      css.replace(highlightCss(), '').replace('figcaption {', 'span.rw-hl { background-color: #d2d2d2; text-decoration: underline; }\nfigcaption {'),
+      css.replace(highlightCss(), '').replace('figcaption {', 'span.rw-hl { background-color: #d2d2d2; text-decoration: underline; }\n.rw-hl-block { background-color: #d2d2d2; }\nfigcaption {'),
     );
     const old = zipSync({ mimetype: [files.mimetype!, { level: 0 }], ...files });
     const r = markEpub(old, ['None of this is new.'])!;
     const after = strFromU8(unzipSync(r.bytes)['OEBPS/style.css']!);
     expect(after.match(/span\.rw-hl/g)).toHaveLength(1);
-    expect(after).not.toContain('underline; }\nfigcaption');
+    expect(after).not.toContain('underline; }\n');
+    expect(after).not.toMatch(/^\.rw-hl-block/m);
     expect(after).toContain(highlightCss());
     expect(after).toContain('figcaption {');
     // Marking again leaves the stylesheet alone.

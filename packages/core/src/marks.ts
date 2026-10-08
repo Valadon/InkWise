@@ -1,6 +1,6 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { findLoose } from './highlights.js';
-import { HIGHLIGHT_BLOCK_CLASS, HIGHLIGHT_CLASS, highlightCss, type HighlightStyle } from './markStyle.js';
+import { HIGHLIGHT_BLOCK_CLASS, HIGHLIGHT_CLASS, MARKABLE_BLOCKS as BLOCK_TAGS, highlightCss, type HighlightStyle } from './markStyle.js';
 
 /**
  * Shows Readwise highlights inside an Inkwise EPUB. The Supernote plugin SDK
@@ -10,14 +10,13 @@ import { HIGHLIGHT_BLOCK_CLASS, HIGHLIGHT_CLASS, highlightCss, type HighlightSty
  */
 
 /** An Inkwise highlight rule from any version, so an old one can be replaced. */
-const HIGHLIGHT_RULE = new RegExp(`^(?:span\\.${HIGHLIGHT_CLASS}|\\.${HIGHLIGHT_BLOCK_CLASS})\\s*\\{[^}]*\\}[ \\t]*\\n?`, 'gm');
+const HIGHLIGHT_RULE = new RegExp(`^(?:span\\.${HIGHLIGHT_CLASS}|[a-z0-9]*\\.${HIGHLIGHT_BLOCK_CLASS})\\s*\\{[^}]*\\}[ \\t]*\\n?`, 'gm');
 
 const OPEN_MARK = `<span class="${HIGHLIGHT_CLASS}">`;
 const TEXT_FILE = /\.(x?html?|css|opf|ncx|xml|txt|svg)$/i;
 const BLOCK_ATTR = ` class="${HIGHLIGHT_BLOCK_CLASS}"`;
 
-/** The blocks a highlight's paragraph mark goes on: never a wrapper like div or section, which could be the whole article. */
-const MARKABLE_BLOCKS = new Set(['p', 'li', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre', 'dt', 'dd', 'figcaption', 'caption', 'td', 'th']);
+const MARKABLE_BLOCKS = new Set(BLOCK_TAGS);
 
 /** Tags after which text on either side reads as separate words. */
 const BREAKING_TAGS = new Set([

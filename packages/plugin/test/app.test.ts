@@ -276,7 +276,7 @@ describe('Send highlight', () => {
     await app.saveSettings({ highlightStyle: 'paragraph' });
     await app.sendSelection();
     const css = () => strFromU8(unzipSync(fs.files.get(path)!)['OEBPS/style.css']!);
-    expect(css()).toContain('.rw-hl-block { background-color: #d2d2d2; }');
+    expect(css()).toContain('p.rw-hl-block { background-color: #d2d2d2; }');
     expect(css()).not.toContain('font-weight: bold; }\n.rw-hl-block');
     await app.saveSettings({ highlightStyle: 'bold' });
     expect(await app.sync(() => {})).toBe('Synced 0 new, 1 updated.');

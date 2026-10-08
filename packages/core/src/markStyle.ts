@@ -4,6 +4,8 @@
 export const HIGHLIGHT_CLASS = 'rw-hl';
 /** Added to each paragraph (or list item, heading, cell) that holds part of a highlight. */
 export const HIGHLIGHT_BLOCK_CLASS = 'rw-hl-block';
+/** The blocks that can carry HIGHLIGHT_BLOCK_CLASS: never a wrapper like div or section, which could be the whole article. */
+export const MARKABLE_BLOCKS = ['p', 'li', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre', 'dt', 'dd', 'figcaption', 'caption', 'td', 'th'];
 
 /**
  * The Manta's reader draws bold words and a grey background on a whole
@@ -17,9 +19,10 @@ export const DEFAULT_HIGHLIGHT_STYLE: HighlightStyle = 'both';
 export function highlightCss(style: HighlightStyle = DEFAULT_HIGHLIGHT_STYLE): string {
   let css = '';
   if (style !== 'paragraph') css += `span.${HIGHLIGHT_CLASS} { font-weight: bold; }\n`;
-  if (style !== 'bold') css += `.${HIGHLIGHT_BLOCK_CLASS} { background-color: #d2d2d2; }\n`;
+  // One rule per element, in the `p.class` form the Manta was seen to draw.
+  if (style !== 'bold') for (const tag of MARKABLE_BLOCKS) css += `${tag}.${HIGHLIGHT_BLOCK_CLASS} { background-color: #d2d2d2; }\n`;
   return css;
 }
 
 /** Bump whenever the markup or CSS changes, so sync re-marks files written the old way. */
-export const MARK_STYLE = 3;
+export const MARK_STYLE = 4;
