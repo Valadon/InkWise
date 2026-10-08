@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Core and CLI tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci
+      - run: npm run build
+      - name: Install plugin dependencies (plugin tests import its sources)
+        run: npm ci
+        working-directory: packages/plugin
+      - run: npm test
+      - name: epubcheck on fixture EPUBs
+        run: npm run epubcheck
+      - name: CLI smoke test (mock Readwise)
+        run: node packages/cli/dist/index.js sync --mock --target folder --out out/mock
+
+  plugin:
+    name: Build Supernote plugin (.snplg)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/plugin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/plugin/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 build-tools;35.0.0'
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Bundle check
+        run: npm run bundle
+      - name: Build .snplg
+        run: bash ./buildPlugin.sh
+        env:
+          CI: '1'
+      - name: Check the package
+        run: |
+          set -e
+          ls -la build/outputs build/generated
+          test -f build/outputs/Inkwise.snplg
+          # react-native-fs is native code, so the package must ship it.
+          test -f build/generated/app.npk || { echo "app.npk missing: native build failed"; exit 1; }
+          grep -q '"reactPackages"' build/generated/PluginConfig.json
+          cat build/generated/PluginConfig.json
+          unzip -l build/outputs/Inkwise.snplg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Inkwise-snplg
+          path: packages/plugin/build/outputs/Inkwise.snplg
+          if-no-files-found: error
+
+  release:
+    name: Attach plugin to release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, plugin]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Inkwise-snplg
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: Inkwise.snplg
+          generate_release_notes: true

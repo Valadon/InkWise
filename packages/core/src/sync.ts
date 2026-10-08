@@ -166,8 +166,8 @@ export async function syncReader(deps: SyncDeps, opts: SyncOptions = {}): Promis
     }
   }
 
-  // Cleanup only when we saw the whole queue; with --limit we can't tell what's missing.
-  if (opts.removeMissing && !opts.limit) {
+  // Cleanup only when we saw the whole queue; if the limit cut the list short we can't tell what's missing.
+  if (opts.removeMissing && (!opts.limit || docs.length < opts.limit)) {
     const current = new Set(docs.map((d) => d.id));
     for (const [id, entry] of Object.entries(manifest.documents)) {
       if (entry.status !== 'synced' || current.has(id)) continue;

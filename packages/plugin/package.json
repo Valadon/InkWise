@@ -1,0 +1,42 @@
+{
+  "name": "Inkwise",
+  "version": "0.1.0",
+  "description": "Readwise Reader on your Supernote: sync articles as EPUBs, send highlights back, archive when done.",
+  "private": true,
+  "scripts": {
+    "build:plugin": "bash ./buildPlugin.sh",
+    "bundle": "react-native bundle --entry-file index.js --bundle-output build/check/index.bundle --platform android --assets-dest build/check --dev false",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "cd ../.. && npx vitest run packages/plugin"
+  },
+  "dependencies": {
+    "@inkwise/core": "file:../core",
+    "fflate": "^0.8.2",
+    "htmlparser2": "^10.0.0",
+    "react": "19.0.0",
+    "react-native": "0.79.2",
+    "react-native-fs": "2.20.0",
+    "sn-plugin-lib": "0.1.65"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@babel/plugin-transform-export-namespace-from": "^7.29.7",
+    "@babel/preset-env": "^7.25.3",
+    "@babel/runtime": "^7.25.0",
+    "@react-native-community/cli": "18.0.0",
+    "@react-native-community/cli-platform-android": "18.0.0",
+    "@react-native/babel-preset": "0.79.2",
+    "@react-native/metro-config": "0.79.2",
+    "@react-native/typescript-config": "0.79.2",
+    "@types/jest": "^29.5.13",
+    "@types/react": "^19.0.0",
+    "@types/react-test-renderer": "^19.0.0",
+    "jest": "^29.6.3",
+    "react-test-renderer": "19.0.0",
+    "typescript": "5.0.4"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

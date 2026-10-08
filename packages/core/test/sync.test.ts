@@ -134,3 +134,16 @@ describe('syncReader', () => {
     expect(manifest.manifest.pendingHighlights).toEqual([]);
   });
 });
+
+describe('syncReader cleanup with a limit', () => {
+  it('still cleans up when the whole queue fit under the limit', async () => {
+    const fake = new FakeReadwise({ documents: loadFixtures() });
+    const client = new ReadwiseClient({ token: 'test-token', fetch: fake.fetch, sleep: noSleep });
+    const output = new MemoryOutput();
+    const manifest = new MemoryManifestStore();
+    await syncReader({ client, output, manifest }, { includeImages: false, limit: 30 });
+    fake.documents[0]!.location = 'archive';
+    const r = await syncReader({ client, output, manifest }, { includeImages: false, limit: 30, removeMissing: true });
+    expect(r.removed).toBe(1);
+  });
+});

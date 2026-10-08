@@ -91,7 +91,16 @@ export class FakeReadwise {
     }
     const update = /^\/api\/v3\/update\/([^/]+)\/$/.exec(path);
     if (method === 'PATCH' && update) {
-      const doc = this.documents.find((d) => d.id === decodeURIComponent(update[1]!));
+      const targetId = decodeURIComponent(update[1]!);
+      const hl = this.highlights.find((h) => h.id === targetId);
+      if (hl) {
+        const extra = Object.keys(body ?? {}).filter((k) => k !== 'notes' && k !== 'tags');
+        if (extra.length) return respond(400, { detail: `Highlights only accept notes and tags.` });
+        if (typeof body?.notes === 'string') hl.notes = body.notes;
+        if (Array.isArray(body?.tags)) hl.tags = body.tags;
+        return respond(200, { id: hl.id, url: `https://read.readwise.io/read/${hl.id}` });
+      }
+      const doc = this.documents.find((d) => d.id === targetId);
       if (!doc) return respond(404, { detail: 'Not found.' });
       Object.assign(doc, body ?? {});
       doc.updated_at = new Date().toISOString();
