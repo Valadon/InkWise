@@ -434,13 +434,14 @@ export class InkwiseApp {
       }
       await this.ensure('plugin.permission.FILE:WRITE');
       const before = await this.fs.readBytes(filePath);
+      const readMs = Date.now() - started;
       const r = markEpub(before, texts, highlightStyle);
       if (!r) {
         await this.log.add(`mark: ${filePath} isn't a readable EPUB (${before.length} bytes)`);
         return { changed: false, message: "Couldn't mark it on the page: the file isn't a readable EPUB." };
       }
       await this.log.add(
-        `mark: ${r.marked} of ${texts.length} found (${highlightStyle}), ${before.length} -> ${r.bytes.length} bytes in ${Date.now() - started} ms`,
+        `mark: ${r.marked} of ${texts.length} found (${highlightStyle}), ${before.length} -> ${r.bytes.length} bytes, read ${readMs} ms, marked ${Date.now() - started - readMs} ms`,
       );
       for (const h of r.missing) await this.log.add(`mark: not found in the text: ${preview(h)}`);
       const how = await this.replaceFile(filePath, r.bytes);
@@ -508,6 +509,7 @@ export class InkwiseApp {
     const problems: string[] = [];
     for (const [id] of docs) {
       const path = joinPath(library, onDisk.get(id)!);
+      await this.log.add(`mark all: ${onDisk.get(id)}${path === open ? ' (open now)' : ''}`);
       const r = await this.markFile(path, id);
       if (r.changed && r.message === SHADED) done++;
       else problems.push(`${m.documents[id]?.title ?? onDisk.get(id)}: ${r.message ?? 'skipped'}`);
