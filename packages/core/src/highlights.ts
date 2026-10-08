@@ -20,6 +20,8 @@ export interface SendResult {
   docId?: string;
   /** The text Readwise accepted, when it differs from the selection. */
   sentText?: string;
+  /** Reader id of the new highlight (lets the UI attach a note afterwards). */
+  highlightId?: string;
 }
 
 export interface SendHighlightInput {
@@ -107,7 +109,7 @@ export async function sendHighlight(input: SendHighlightInput): Promise<SendResu
 }
 
 type Attempt =
-  | { kind: 'sent'; sentText: string }
+  | { kind: 'sent'; sentText: string; highlightId?: string }
   | { kind: 'not_found'; error: string }
   | { kind: 'offline'; error: string }
   | { kind: 'auth'; error: string }
@@ -121,8 +123,8 @@ async function attemptSend(client: ReadwiseClient, p: PendingHighlight): Promise
     if (!candidate || tried.has(candidate)) return null;
     tried.add(candidate);
     try {
-      await client.createHighlight({ parentId: p.docId, text: candidate, note: p.note || undefined });
-      return { kind: 'sent', sentText: candidate };
+      const created = await client.createHighlight({ parentId: p.docId, text: candidate, note: p.note || undefined });
+      return { kind: 'sent', sentText: candidate, highlightId: created.id || undefined };
     } catch (err) {
       if (err instanceof NetworkError) return { kind: 'offline', error: err.message };
       if (err instanceof ReadwiseError) {
@@ -180,6 +182,7 @@ async function finish(
         message: 'Highlight sent.',
         docId: p.docId,
         sentText: outcome.sentText !== p.text ? outcome.sentText : undefined,
+        highlightId: outcome.highlightId,
       };
     case 'offline':
     case 'retryable':
@@ -206,6 +209,38 @@ async function finish(
         message: "Readwise couldn't match this text. Saved in Inkwise settings for review.",
         docId: p.docId,
       };
+  }
+}
+
+/**
+ * Attach a note after the fact: on Readwise if the highlight was sent, or on the
+ * queued copy if it's still waiting.
+ */
+export async function addNoteToHighlight(opts: {
+  client: ReadwiseClient;
+  manifest: ManifestStore;
+  docId: string;
+  text: string;
+  note: string;
+  highlightId?: string;
+}): Promise<{ ok: boolean; message: string }> {
+  const note = opts.note.trim();
+  if (!note) return { ok: false, message: 'Type a note first.' };
+  const manifest = await opts.manifest.load();
+  const hash = highlightHash(opts.docId, opts.text);
+  const queued = manifest.pendingHighlights.find((p) => p.docId === opts.docId && highlightHash(p.docId, p.text) === hash);
+  if (queued) {
+    queued.note = note;
+    await opts.manifest.save(manifest);
+    return { ok: true, message: 'Note saved; it will go with the highlight.' };
+  }
+  if (!opts.highlightId) return { ok: false, message: "Couldn't find that highlight to attach a note." };
+  try {
+    await opts.client.updateHighlightNotes(opts.highlightId, note);
+    return { ok: true, message: 'Note added.' };
+  } catch (err) {
+    if (err instanceof NetworkError) return { ok: false, message: 'No connection. The highlight is saved; add the note in Reader later.' };
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
   }
 }
 

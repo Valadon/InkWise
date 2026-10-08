@@ -184,6 +184,11 @@ export class ReadwiseClient {
     });
   }
 
+  /** Set the note on an existing highlight (Reader only allows `notes` and `tags` here). */
+  async updateHighlightNotes(highlightId: string, notes: string): Promise<void> {
+    await this.request('PATCH', `/api/v3/update/${encodeURIComponent(highlightId)}/`, { notes });
+  }
+
   /** Move a Reader document to a location (Inkwise uses `archive`). */
   async moveDocument(id: string, location: string): Promise<void> {
     await this.request('PATCH', `/api/v3/update/${encodeURIComponent(id)}/`, { location });
