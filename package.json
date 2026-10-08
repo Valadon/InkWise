@@ -1,0 +1,24 @@
+{
+  "name": "inkwise",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Readwise Reader for Supernote: Reader queue to EPUB, highlights back to Readwise.",
+  "workspaces": [
+    "packages/core",
+    "packages/cli"
+  ],
+  "scripts": {
+    "build": "npm run build -w @inkwise/core && npm run build -w @inkwise/cli",
+    "typecheck": "tsc -b packages/core packages/cli",
+    "test": "vitest run",
+    "epubcheck": "node scripts/epubcheck-fixtures.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  }
+}

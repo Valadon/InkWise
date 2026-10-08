@@ -1,0 +1,20 @@
+{
+  "id": "01fixtureimages0000000000b",
+  "url": "https://read.readwise.io/read/01fixtureimages0000000000b",
+  "source_url": "https://example.com/photo/field-notes/",
+  "title": "Field Notes: Photographing Fog",
+  "author": "Sam Placeholder",
+  "category": "article",
+  "location": "later",
+  "tags": {},
+  "site_name": "Example Photo",
+  "word_count": 300,
+  "reading_time": "2 mins",
+  "created_at": "2026-10-03T12:00:00.000000+00:00",
+  "updated_at": "2026-10-03T12:00:00.000000+00:00",
+  "published_date": 1759190400000,
+  "content": null,
+  "parent_id": null,
+  "notes": "",
+  "html_content": "<article><p>Fog flattens everything. That’s the point.</p><figure><img src=\"/img/fog-1.png\" alt=\"A pier vanishing into fog\"><figcaption>The pier at 6 a.m.</figcaption></figure><p>Expose for the highlights and let the shadows go.</p><p><img src=\"https://cdn.example.com/missing.jpg\" alt=\"Broken image\"></p><picture><source srcset=\"x.webp\"><img src=\"img/fog-2.gif\" alt=\"\"></picture><p>Some images have no alt text at all.</p></article>"
+}

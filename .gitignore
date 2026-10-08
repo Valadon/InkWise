@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.inkwise/
+out/
+.env
+coverage/
+packages/plugin/android/
+packages/plugin/ios/
+packages/plugin/build/
+*.snplg

@@ -1,0 +1,20 @@
+{
+  "id": "01fixturecodetables00000c",
+  "url": "https://read.readwise.io/read/01fixturecodetables00000c",
+  "source_url": "https://example.dev/blog/parsing-with-care",
+  "title": "Parsing <HTML> with Care & Patience",
+  "author": null,
+  "category": "article",
+  "location": "later",
+  "tags": {},
+  "site_name": null,
+  "word_count": 500,
+  "reading_time": null,
+  "created_at": "2026-10-04T12:00:00.000000+00:00",
+  "updated_at": "2026-10-04T12:00:00.000000+00:00",
+  "published_date": null,
+  "content": null,
+  "parent_id": null,
+  "notes": "",
+  "html_content": "<p>Here is a function:</p><pre><code class=\"language-ts\">function add(a: number, b: number): number {\n  return a &lt; b ? b + a : a + b; // &amp;&amp; done\n}\n</code></pre><p>And a table:</p><table><thead><tr><th>Name</th><th colspan=\"2\">Value</th></tr></thead><tbody><tr><td>alpha</td><td>1</td><td>2</td></tr><tr><td>beta</td><td colspan=\"x\">3</td><td>4</td></tr></tbody></table><p>Inline <code>x &lt;= y</code> and <kbd>Ctrl</kbd>+<kbd>C</kbd>.</p>"
+}

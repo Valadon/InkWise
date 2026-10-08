@@ -1,0 +1,30 @@
+{
+  "name": "@inkwise/core",
+  "version": "0.1.0",
+  "description": "Pure TypeScript core for Inkwise: Readwise client, HTML cleanup, EPUB builder, sync and highlight logic. No Node or DOM APIs; IO is injected.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/fake-readwise.d.ts",
+      "default": "./dist/testing/fake-readwise.js"
+    }
+  },
+  "react-native": "src/index.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2",
+    "htmlparser2": "^10.0.0"
+  }
+}

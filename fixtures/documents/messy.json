@@ -1,0 +1,20 @@
+{
+  "id": "01fixturemessy00000000000d",
+  "url": "https://read.readwise.io/read/01fixturemessy00000000000d",
+  "source_url": "https://news.example.org/2026/10/a-messy-page.html",
+  "title": "A Messy Page: Scripts, Iframes / Forms?",
+  "author": "Pat Q. Writer",
+  "category": "article",
+  "location": "later",
+  "tags": {},
+  "site_name": "Example News",
+  "word_count": 200,
+  "reading_time": "1 min",
+  "created_at": "2026-10-05T12:00:00.000000+00:00",
+  "updated_at": "2026-10-05T12:00:00.000000+00:00",
+  "published_date": "2026-10-05T09:00:00+00:00",
+  "content": null,
+  "parent_id": null,
+  "notes": "",
+  "html_content": "<script>alert('x')</script><style>p{color:red}</style><p onclick=\"evil()\" style=\"color:red\" class=\"lead\" id=\"intro\">The first paragraph<div>with a div inside it</div> and more text.</p><iframe src=\"https://youtube.com/embed/x\"></iframe><form action=\"/subscribe\"><input type=\"email\"><button>Subscribe</button></form><p>A <a href=\"/relative/link\" target=\"_blank\">relative link</a>, a <a href=\"javascript:alert(1)\">bad link</a>, and an <a href=\"#footnote-1\">anchor</a>.</p><p>Unclosed <em>emphasis and <strong>strong<p>Next paragraph after implied close.</p><li>orphan list item</li><font face=\"Comic Sans\">Old font tag</font><br><hr><p>Control\u0007char and soft­hyphen stay as-is.</p><svg><text>svg text</text></svg><noscript>Enable JS</noscript><p>Done.</p>"
+}
