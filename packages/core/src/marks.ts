@@ -1,18 +1,22 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { findLoose } from './highlights.js';
-import { HIGHLIGHT_CLASS, HIGHLIGHT_CSS } from './markStyle.js';
+import { HIGHLIGHT_BLOCK_CLASS, HIGHLIGHT_CLASS, highlightCss, type HighlightStyle } from './markStyle.js';
 
 /**
  * Shows Readwise highlights inside an Inkwise EPUB. The Supernote plugin SDK
  * can't add a highlight to a DOC page, so Inkwise wraps the passage in a styled
- * span in the EPUB itself. The text is untouched (no characters added, moved or
- * removed), so pages lay out the same and handwritten marks stay in place.
+ * span in the EPUB itself, and tags the paragraphs it touches. No characters
+ * are added, moved or removed; how it looks is up to the CSS (markStyle.ts).
  */
 
 /** An Inkwise highlight rule from any version, so an old one can be replaced. */
-const HIGHLIGHT_RULE = new RegExp(`^span\\.${HIGHLIGHT_CLASS}\\s*\\{[^}]*\\}[ \\t]*\\n?`, 'gm');
+const HIGHLIGHT_RULE = new RegExp(`^(?:span\\.${HIGHLIGHT_CLASS}|\\.${HIGHLIGHT_BLOCK_CLASS})\\s*\\{[^}]*\\}[ \\t]*\\n?`, 'gm');
 
 const OPEN_MARK = `<span class="${HIGHLIGHT_CLASS}">`;
+const BLOCK_ATTR = ` class="${HIGHLIGHT_BLOCK_CLASS}"`;
+
+/** The blocks a highlight's paragraph mark goes on: never a wrapper like div or section, which could be the whole article. */
+const MARKABLE_BLOCKS = new Set(['p', 'li', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre', 'dt', 'dd', 'figcaption', 'caption', 'td', 'th']);
 
 /** Tags after which text on either side reads as separate words. */
 const BREAKING_TAGS = new Set([
@@ -50,6 +54,7 @@ type Token = TextToken | { kind: 'tag'; raw: string };
  */
 export function markHighlights(xhtml: string, highlights: string[]): MarkResult {
   const tokens = tokenize(stripMarks(xhtml));
+  const blockOf = innermostBlocks(tokens);
 
   // Join eligible text into one string, with a space where a block boundary
   // separated two runs. `owner[i]` says which token and character produced it.
@@ -76,6 +81,8 @@ export function markHighlights(xhtml: string, highlights: string[]): MarkResult 
 
   /** Per token: plain-character ranges to wrap. */
   const wraps = new Map<number, [number, number][]>();
+  /** Opening tags of the blocks to tag. */
+  const blocks = new Set<number>();
   let marked = 0;
   const missing: string[] = [];
   for (const h of dedupe(highlights)) {
@@ -88,6 +95,8 @@ export function markHighlights(xhtml: string, highlights: string[]): MarkResult 
     for (let i = range.start; i < range.end; i++) {
       const o = owner[i];
       if (!o) continue;
+      const block = blockOf.get(o.token);
+      if (block !== undefined && !/\s/.test(plain[i]!)) blocks.add(block);
       const list = wraps.get(o.token) ?? [];
       const last = list[list.length - 1];
       if (last && last[1] === o.index) last[1] = o.index + 1;
@@ -97,11 +106,42 @@ export function markHighlights(xhtml: string, highlights: string[]): MarkResult 
   }
 
   const out = tokens.map((t, ti) => {
+    if (t.kind === 'tag') return blocks.has(ti) ? addBlockClass(t.raw) : t.raw;
     const list = wraps.get(ti);
-    if (t.kind === 'tag' || !list) return t.raw;
-    return wrapToken(t, mergeRanges(list));
+    return list ? wrapToken(t, mergeRanges(list)) : t.raw;
   });
   return { xhtml: out.join(''), marked, missing };
+}
+
+/** For each text token, the opening tag of the innermost markable block around it. */
+function innermostBlocks(tokens: Token[]): Map<number, number> {
+  const out = new Map<number, number>();
+  const stack: { name: string; token: number }[] = [];
+  tokens.forEach((t, ti) => {
+    if (t.kind === 'text') {
+      const top = stack[stack.length - 1];
+      if (top) out.set(ti, top.token);
+      return;
+    }
+    const name = tagName(t.raw);
+    if (!name || !MARKABLE_BLOCKS.has(name) || t.raw.endsWith('/>')) return;
+    if (!t.raw.startsWith('</')) {
+      stack.push({ name, token: ti });
+      return;
+    }
+    const at = stack.map((b) => b.name).lastIndexOf(name);
+    if (at >= 0) stack.length = at;
+  });
+  return out;
+}
+
+/** Add the block class to an opening tag, merging with a class it already has. */
+function addBlockClass(tag: string): string {
+  const cls = /\sclass\s*=\s*(["'])(.*?)\1/.exec(tag);
+  if (!cls) return tag.replace(/^<[a-zA-Z][a-zA-Z0-9]*/, (open) => open + BLOCK_ATTR);
+  const names = cls[2]!.split(/\s+/).filter(Boolean);
+  if (names.includes(HIGHLIGHT_BLOCK_CLASS)) return tag;
+  return tag.replace(cls[0], ` class=${cls[1]}${[...names, HIGHLIGHT_BLOCK_CLASS].join(' ')}${cls[1]}`);
 }
 
 function wrapToken(t: TextToken, ranges: [number, number][]): string {
@@ -137,8 +177,17 @@ function dedupe(list: string[]): string[] {
   return [...new Set(list.map((h) => h.trim()).filter(Boolean))];
 }
 
-/** Remove Inkwise's own highlight spans, keeping their text. */
+/** Remove Inkwise's own highlight spans and paragraph tags, keeping their text. */
 export function stripMarks(xhtml: string): string {
+  if (xhtml.includes(HIGHLIGHT_BLOCK_CLASS)) {
+    xhtml = xhtml.replace(/<[a-zA-Z][^>]*>/g, (tag) =>
+      !tag.includes(HIGHLIGHT_BLOCK_CLASS)
+        ? tag
+        : tag
+            .replace(BLOCK_ATTR, '')
+            .replace(new RegExp(`(\\sclass\\s*=\\s*(["'])[^"']*?)\\s+${HIGHLIGHT_BLOCK_CLASS}(?=[\\s"'])`), '$1'),
+    );
+  }
   if (!xhtml.includes(OPEN_MARK)) return xhtml;
   const stack: boolean[] = [];
   return xhtml.replace(/<\/?span\b[^>]*>/g, (tag) => {
@@ -225,7 +274,11 @@ function splitUnits(s: string): string[] {
  * Apply highlights to every content document in an EPUB and make sure its
  * stylesheet can show them. Returns null when the bytes aren't a readable EPUB.
  */
-export function markEpub(bytes: Uint8Array, highlights: string[]): { bytes: Uint8Array; marked: number; missing: string[] } | null {
+export function markEpub(
+  bytes: Uint8Array,
+  highlights: string[],
+  style?: HighlightStyle,
+): { bytes: Uint8Array; marked: number; missing: string[] } | null {
   let files: Record<string, Uint8Array>;
   try {
     files = unzipSync(bytes);
@@ -246,11 +299,10 @@ export function markEpub(bytes: Uint8Array, highlights: string[]): { bytes: Uint
   }
   marked = dedupe(highlights).length - missing.length;
 
+  // Swap in the current rules for whatever an older build (or style) wrote.
   for (const name of Object.keys(files).filter((n) => n.endsWith('.css'))) {
-    const css = strFromU8(files[name]!);
-    if (css.includes(HIGHLIGHT_CSS)) continue;
-    const rest = css.replace(HIGHLIGHT_RULE, '');
-    files[name] = strToU8(rest + (rest === '' || rest.endsWith('\n') ? '' : '\n') + HIGHLIGHT_CSS);
+    const rest = strFromU8(files[name]!).replace(HIGHLIGHT_RULE, '');
+    files[name] = strToU8(rest + (rest === '' || rest.endsWith('\n') ? '' : '\n') + highlightCss(style));
   }
 
   // The mimetype entry must come first and be stored uncompressed.

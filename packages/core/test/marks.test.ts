@@ -1,6 +1,6 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
-import { HIGHLIGHT_CSS, buildEpub, markEpub, markHighlights, stripMarks } from '../src/index.js';
+import { buildEpub, highlightCss, markEpub, markHighlights, stripMarks } from '../src/index.js';
 import { fixture } from './helpers.js';
 
 const page = (body: string) =>
@@ -11,14 +11,33 @@ describe('markHighlights', () => {
     const src = page('<p>One two three. Four five six.</p>');
     const r = markHighlights(src, ['Four five six.']);
     expect(r.marked).toBe(1);
-    expect(r.xhtml).toContain('<p>One two three. <span class="rw-hl">Four five six.</span></p>');
+    expect(r.xhtml).toContain('<p class="rw-hl-block">One two three. <span class="rw-hl">Four five six.</span></p>');
+    expect(stripMarks(r.xhtml)).toBe(src);
+  });
+
+  it('tags only the innermost paragraph-like block, never a wrapper', () => {
+    const src = page('<div><p>Kept plain.</p><blockquote><p>Quoted words.</p></blockquote>Loose text.</div><ul><li value="2">Item text.</li></ul>');
+    const r = markHighlights(src, ['Quoted words.', 'Loose text.', 'Item text.']);
+    expect(r.marked).toBe(3);
+    expect(r.xhtml).toContain('<p>Kept plain.</p><blockquote><p class="rw-hl-block">');
+    expect(r.xhtml).toContain('<div><p>');
+    expect(r.xhtml).toContain('<li class="rw-hl-block" value="2">');
+    // Text straight inside a div gets the bold span but no paragraph mark.
+    expect(r.xhtml).toContain('</blockquote><span class="rw-hl">Loose text.</span></div>');
+    expect(stripMarks(r.xhtml)).toBe(src);
+  });
+
+  it('adds to an existing class instead of writing a second one', () => {
+    const src = page('<p class="lede">Some lede.</p>');
+    const r = markHighlights(src, ['Some lede.']);
+    expect(r.xhtml).toContain('<p class="lede rw-hl-block">');
     expect(stripMarks(r.xhtml)).toBe(src);
   });
 
   it('marks across inline tags and paragraphs, one span per text run', () => {
     const r = markHighlights(page('<p>Start <em>middle</em> end.</p><p>Next para here.</p>'), ['middle end. Next para']);
     expect(r.xhtml).toContain('<em><span class="rw-hl">middle</span></em> <span class="rw-hl">end.</span>');
-    expect(r.xhtml).toContain('<p><span class="rw-hl">Next para</span> here.</p>');
+    expect(r.xhtml).toContain('<p class="rw-hl-block"><span class="rw-hl">Next para</span> here.</p>');
   });
 
   it('matches curly quotes, entities and dashes loosely', () => {
@@ -50,19 +69,34 @@ describe('markEpub', () => {
     const files = unzipSync(r.bytes);
     expect(Object.keys(files)[0]).toBe('mimetype');
     expect(strFromU8(files['OEBPS/article.xhtml']!)).toContain(`<span class="rw-hl">${sentence}</span>`);
-    expect(strFromU8(files['OEBPS/style.css']!)).toContain('span.rw-hl');
+    expect(strFromU8(files['OEBPS/style.css']!)).toContain(highlightCss('both'));
+  });
+
+  it('writes the CSS for the chosen style', () => {
+    const plain = buildEpub(fixture('longform'), { modified: new Date('2026-10-08T00:00:00Z') });
+    const cssFor = (style: 'both' | 'bold' | 'paragraph') =>
+      strFromU8(unzipSync(markEpub(plain.bytes, ['None of this is new.'], style)!.bytes)['OEBPS/style.css']!);
+    expect(cssFor('bold')).toContain('span.rw-hl { font-weight: bold; }');
+    expect(cssFor('bold')).not.toContain('.rw-hl-block');
+    expect(cssFor('paragraph')).toContain('.rw-hl-block { background-color: #d2d2d2; }');
+    expect(cssFor('paragraph')).not.toContain('span.rw-hl');
+    expect(cssFor('both')).toContain(highlightCss('both'));
   });
 
   it('swaps an older highlight rule for the current one, once', () => {
     const doc = fixture('longform');
     const files = unzipSync(buildEpub(doc, { modified: new Date('2026-10-08T00:00:00Z') }).bytes);
     const css = strFromU8(files['OEBPS/style.css']!);
-    files['OEBPS/style.css'] = strToU8(css.replace(HIGHLIGHT_CSS, 'span.rw-hl { background-color: #d2d2d2; }\n'));
+    // What builds 0.2.8 and 0.2.9 wrote, in the middle of the stylesheet.
+    files['OEBPS/style.css'] = strToU8(
+      css.replace(highlightCss(), '').replace('figcaption {', 'span.rw-hl { background-color: #d2d2d2; text-decoration: underline; }\nfigcaption {'),
+    );
     const old = zipSync({ mimetype: [files.mimetype!, { level: 0 }], ...files });
     const r = markEpub(old, ['None of this is new.'])!;
     const after = strFromU8(unzipSync(r.bytes)['OEBPS/style.css']!);
     expect(after.match(/span\.rw-hl/g)).toHaveLength(1);
-    expect(after).toContain(HIGHLIGHT_CSS);
+    expect(after).not.toContain('underline; }\nfigcaption');
+    expect(after).toContain(highlightCss());
     expect(after).toContain('figcaption {');
     // Marking again leaves the stylesheet alone.
     expect(strFromU8(unzipSync(markEpub(r.bytes, ['None of this is new.'])!.bytes)['OEBPS/style.css']!)).toBe(after);

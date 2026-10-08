@@ -95,7 +95,18 @@ export function SettingsScreen({ app, onClose }: { app: InkwiseApp; onClose: () 
           onEndEditing={(e) => update({ maxArticles: Number(e.nativeEvent.text) })}
         />
         <Toggle label="Images" value={settings.images} onChange={(images) => update({ images })} />
-        <Toggle label="Mark highlights in articles" value={settings.showHighlights} onChange={(showHighlights) => update({ showHighlights })} />
+        <Choice
+          label="Mark highlights in articles"
+          value={settings.showHighlights ? settings.highlightStyle : 'off'}
+          options={[
+            { value: 'both', label: 'Bold and shaded paragraph' },
+            { value: 'bold', label: 'Bold words' },
+            { value: 'paragraph', label: 'Shaded paragraph' },
+            { value: 'off', label: 'Off' },
+          ]}
+          onChange={(v) => update(v === 'off' ? { showHighlights: false } : { showHighlights: true, highlightStyle: v })}
+        />
+        {settings.showHighlights ? <Line small>Articles you already have change on your next sync.</Line> : null}
         <Field label="Folder inside Document" defaultValue={settings.folderName} onEndEditing={(e) => update({ folderName: e.nativeEvent.text })} />
       </Section>
 

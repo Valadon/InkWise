@@ -90,6 +90,9 @@ describe('syncReader', () => {
     const again = await syncReader(deps);
     expect(again.updated).toBe(1);
     expect(manifest.manifest.documents[doc.id]!.marked).toBe(highlightsKey(['None of this is new.']));
+    // Picking another style in settings redoes it too.
+    expect((await syncReader(deps, { highlightStyle: 'bold' })).updated).toBe(1);
+    expect((await syncReader(deps, { highlightStyle: 'bold' })).updated).toBe(0);
   });
 
   it('leaves EPUBs plain when highlights are turned off', async () => {

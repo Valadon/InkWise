@@ -14,10 +14,10 @@ const PHRASE = 'these words should look marked';
 
 /** [label, css for .tN (or null), how to wrap the phrase]. */
 const VARIANTS = [
-  ['Light grey background (what Inkwise used so far)', 'background-color: #d2d2d2;', 'span'],
+  ['Light grey background (build 0.2.8)', 'background-color: #d2d2d2;', 'span'],
   ['Dark grey background', 'background-color: #999999;', 'span'],
   ['Underline', 'text-decoration: underline;', 'span'],
-  ['Underline plus light grey background (this build)', 'background-color: #d2d2d2; text-decoration: underline;', 'span'],
+  ['Underline plus light grey background (build 0.2.9)', 'background-color: #d2d2d2; text-decoration: underline;', 'span'],
   ['Built-in ins element, no CSS', null, 'ins'],
   ['Built-in u element, no CSS', null, 'u'],
   ['Built-in mark element, no CSS', null, 'mark'],

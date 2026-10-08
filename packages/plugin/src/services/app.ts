@@ -14,7 +14,9 @@ import {
   updateManifest,
   highlightsKey,
   markEpub,
+  DEFAULT_HIGHLIGHT_STYLE,
   type FetchLike,
+  type HighlightStyle,
   type ManifestStore,
   type OutputAdapter,
   type PendingHighlight,
@@ -60,8 +62,10 @@ export interface Settings {
   afterArchive: AfterArchive;
   /** Tidy up EPUBs whose documents left the queue on each sync. */
   removeMissing: boolean;
-  /** Shade sent highlights (and ones made in Reader) in the EPUBs. */
+  /** Mark sent highlights (and ones made in Reader) in the EPUBs. */
   showHighlights: boolean;
+  /** Bold words, a shaded paragraph, or both. */
+  highlightStyle: HighlightStyle;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -73,6 +77,7 @@ export const DEFAULT_SETTINGS: Settings = {
   afterArchive: 'move',
   removeMissing: false,
   showHighlights: true,
+  highlightStyle: DEFAULT_HIGHLIGHT_STYLE,
 };
 
 export const STORAGE_ROOT = '/storage/emulated/0';
@@ -158,6 +163,7 @@ export class InkwiseApp {
     next.maxArticles = Math.max(1, Math.min(200, Math.round(Number(next.maxArticles) || DEFAULT_SETTINGS.maxArticles)));
     next.folderName = sanitizeFolder(next.folderName);
     next.tag = next.tag.trim();
+    if (!['both', 'bold', 'paragraph'].includes(next.highlightStyle)) next.highlightStyle = DEFAULT_HIGHLIGHT_STYLE;
     const text = JSON.stringify(next, null, 2);
     await this.fs.writeText(joinPath(await this.privateDir(), 'settings.json'), text);
     await this.backUp('settings.json', text);
@@ -322,6 +328,7 @@ export class InkwiseApp {
           removeMissing: settings.removeMissing,
           removeMode: 'archive-folder',
           showHighlights: settings.showHighlights,
+          highlightStyle: settings.highlightStyle,
         },
       );
       const tidied = await this.tidyArchived();
@@ -373,14 +380,15 @@ export class InkwiseApp {
    * shading is off or doesn't apply.
    */
   async shadeOpenFile(filePath: string, docId: string, force = false): Promise<string | undefined> {
-    if (!/\.epub$/i.test(filePath) || !(await this.settings()).showHighlights) return undefined;
+    const { showHighlights, highlightStyle } = await this.settings();
+    if (!/\.epub$/i.test(filePath) || !showHighlights) return undefined;
     try {
       const store = await this.manifest();
       const texts = (await store.load()).docHighlights[docId] ?? [];
       // `force` rewrites even with nothing to shade, to clear a deleted highlight.
       if (!texts.length && !force) return undefined;
       await this.ensure('plugin.permission.FILE:WRITE');
-      const r = markEpub(await this.fs.readBytes(filePath), texts);
+      const r = markEpub(await this.fs.readBytes(filePath), texts, highlightStyle);
       if (!r) return "Couldn't mark it on the page: the file isn't a readable EPUB.";
       const name = filePath.split('/').pop()!;
       const tmp = joinPath(dirOf(filePath), `.${name}.part`);
@@ -388,7 +396,7 @@ export class InkwiseApp {
       await this.fs.move(tmp, filePath);
       await updateManifest(store, (m) => {
         const d = m.documents[docId];
-        if (d && d.filename === name) d.marked = highlightsKey(texts);
+        if (d && d.filename === name) d.marked = highlightsKey(texts, highlightStyle);
       });
       await this.host.reloadFile();
       return r.marked || !texts.length ? SHADED : "Couldn't find the passage on the page to mark it.";

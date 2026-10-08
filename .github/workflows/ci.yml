@@ -80,10 +80,14 @@ jobs:
           grep -q '"reactPackages"' build/generated/PluginConfig.json
           cat build/generated/PluginConfig.json
           unzip -l build/outputs/Inkwise.snplg
+      # The version in the file name means a new build never collides with the
+      # old one on the device (the Manta saves a clash as "Inkwise (1).snplg").
+      - name: Name the file by version
+        run: cp build/outputs/Inkwise.snplg "build/outputs/Inkwise-${{ steps.stamp.outputs.version }}.snplg"
       - uses: actions/upload-artifact@v4
         with:
           name: Inkwise-snplg-${{ steps.stamp.outputs.version }}
-          path: packages/plugin/build/outputs/Inkwise.snplg
+          path: packages/plugin/build/outputs/Inkwise-${{ steps.stamp.outputs.version }}.snplg
           if-no-files-found: error
 
   release:
@@ -100,5 +104,5 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: Inkwise.snplg
+          files: Inkwise-*.snplg
           generate_release_notes: true

@@ -241,6 +241,21 @@ describe('Send highlight', () => {
     expect(await app.sync(() => {})).toBe('Synced 0 new, 0 updated.');
   });
 
+  it('marks in the style picked in settings, and redoes old articles on sync', async () => {
+    const path = `${LIBRARY}/${epubFilename(longform)}`;
+    host.filePath = path;
+    host.selection = 'None of this is new.';
+    await app.saveSettings({ highlightStyle: 'paragraph' });
+    await app.sendSelection();
+    const css = () => strFromU8(unzipSync(fs.files.get(path)!)['OEBPS/style.css']!);
+    expect(css()).toContain('.rw-hl-block { background-color: #d2d2d2; }');
+    expect(css()).not.toContain('font-weight: bold; }\n.rw-hl-block');
+    await app.saveSettings({ highlightStyle: 'bold' });
+    expect(await app.sync(() => {})).toBe('Synced 0 new, 1 updated.');
+    expect(css()).toContain('span.rw-hl { font-weight: bold; }');
+    expect(css()).not.toContain('.rw-hl-block {');
+  });
+
   it('quick send stays silent when the highlight is sent and shaded', async () => {
     host.filePath = `${LIBRARY}/${epubFilename(longform)}`;
     host.selection = 'None of this is new.';
