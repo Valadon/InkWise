@@ -55,6 +55,9 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: 'platforms;android-35 build-tools;35.0.0'
+      - name: Build core (the plugin typechecks against its declarations)
+        run: npm ci && npx tsc -b packages/core
+        working-directory: .
       - run: npm ci
       - run: npm run typecheck
       - name: Bundle check
