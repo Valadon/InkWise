@@ -59,7 +59,11 @@ Use the reMarkable cloud API (like rmapi) from a server or scheduled job instead
 
 ## Next steps
 
-1. Lance: highlight a few passages (two colours, one across a page break) in any EPUB on the Paper Pro, then copy that document's folder from `/home/root/.local/share/remarkable/xochitl/` using reManager's file browser. Book text only, nothing private, since these files stay out of the public repo.
-2. ~~Prototype the `.rm` highlight reader~~ Done: `packages/remarkable/src/rmHighlights.ts`, tested on rmscene fixtures (firmware 3.1 and 3.14). Checked on Lance's Paper Pro pages: all three highlights (two-line, three-line over links, across a page turn) come back whole.
-3. Prototype the document writer and test one Reader article landing in an Inkwise folder.
-4. Wrap both in an AppLoad app and a Vellum package.
+1. ~~Sample pages from the Paper Pro~~ Done (Lance, 2026-10-08).
+2. ~~Highlight reader~~ Done: `rmHighlights.ts` + `assemble.ts`. All three of Lance's test highlights (two-line, three-line over links, across a page turn) come back whole.
+3. ~~Document writer~~ Done, against a fake library folder: `xochitl.ts` (`XochitlOutput`) puts Reader EPUBs in an "Inkwise" folder, archives to "Inkwise/Archive", sends removed ones to the tablet's trash, and never replaces a book that has annotations. `highlightSync.ts` sends every highlight on every Inkwise book to Readwise; a full round trip passes against the fake Readwise API.
+4. Check the `.metadata`/`.content` we write against a real one from the Paper Pro (asked Lance), and note his software version.
+5. Device runtime: one aarch64 binary (`bun build --compile`) that runs sync, then restarts xochitl only when `XochitlOutput.changed` is set, plus an AppLoad screen (Connect, Sync now, last result).
+6. Vellum package so it installs from reManager.
+
+Open questions: whether a xovi hook can refresh the library without restarting xochitl; whether growing an existing highlight should replace the old one in Readwise (today it adds a second one).

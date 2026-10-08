@@ -1,2 +1,5 @@
 export * from './rmHighlights.js';
 export * from './assemble.js';
+export * from './epubText.js';
+export * from './xochitl.js';
+export * from './highlightSync.js';
