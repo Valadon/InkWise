@@ -95,7 +95,7 @@ These are the open questions only a device can answer. If any of them goes wrong
 | Does Reader accept `DELETE /api/v3/delete/<id>/` for a highlight? | Delete highlight | An error message instead of "Highlight deleted." |
 | Is the handwriting file really `<name>.epub.mark` next to the EPUB? | Done, then sync | Handwriting missing after the article moves to Archive. |
 | Does `reloadFile()` show a rewritten EPUB straight away, and do handwritten marks survive it? | Marking highlights | No mark until the article is closed and reopened, or handwriting that moves. Marking can be turned off in settings. |
-| Which highlight styles does the DOC reader draw? | Marking highlights | Answered on a Manta with the plugin beta (2026-10-08): bold, grey text, and a background or border on a whole paragraph. No underlines, and no background behind words. To check another device, run `node scripts/make-highlight-test-epub.mjs` and note which numbered lines look marked. |
+| Which highlight styles does the DOC reader draw? | Marking highlights | Answered on a Manta with the plugin beta (2026-10-08): bold, grey text, and a background or border on a whole paragraph. No underlines, and no background behind words. The reader also skips a rule written for a bare class (`.rw-hl-block`) and draws only rules that name the element too (`p.rw-hl-block`), so Inkwise writes one rule per element. To check another device, run `node scripts/make-highlight-test-epub.mjs` and note which numbered lines look marked. |
 | Does Reader's tag filter want the tag's display name or its lowercase key? | Sync with a tag set | A tag filter that finds nothing. Try the tag in lowercase. |
 
 ## If something breaks

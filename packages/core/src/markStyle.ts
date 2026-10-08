@@ -19,7 +19,7 @@ export const DEFAULT_HIGHLIGHT_STYLE: HighlightStyle = 'both';
 export function highlightCss(style: HighlightStyle = DEFAULT_HIGHLIGHT_STYLE): string {
   let css = '';
   if (style !== 'paragraph') css += `span.${HIGHLIGHT_CLASS} { font-weight: bold; }\n`;
-  // One rule per element, in the `p.class` form the Manta was seen to draw.
+  // One rule per element: the Manta's reader skips a bare `.class` rule and only draws `p.class` ones.
   if (style !== 'bold') for (const tag of MARKABLE_BLOCKS) css += `${tag}.${HIGHLIGHT_BLOCK_CLASS} { background-color: #d2d2d2; }\n`;
   return css;
 }
