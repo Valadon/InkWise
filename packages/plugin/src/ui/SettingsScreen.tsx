@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type { PendingHighlight } from '@inkwise/core';
 import { TOKEN_IMPORT_PATH, type InkwiseApp, type Settings } from '../services/app';
+import { BUILD } from '../buildInfo';
 import { Button, Choice, Field, Line, Page, Quote, Row, Section, Toggle } from './kit';
 
 export function SettingsScreen({ app, onClose }: { app: InkwiseApp; onClose: () => void }) {
@@ -148,6 +149,9 @@ export function SettingsScreen({ app, onClose }: { app: InkwiseApp; onClose: () 
         ) : null}
         {queueMsg ? <Line strong>{queueMsg}</Line> : null}
       </Section>
+      <Line small>
+        Inkwise {BUILD.version} (build {BUILD.commit})
+      </Line>
     </Page>
   );
 }

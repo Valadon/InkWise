@@ -1,6 +1,6 @@
 {
   "name": "Inkwise",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Readwise Reader on your Supernote: sync articles as EPUBs, send highlights back, archive when done.",
   "private": true,
   "scripts": {

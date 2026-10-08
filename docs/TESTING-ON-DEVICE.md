@@ -37,7 +37,7 @@ inkwise sync --target folder --out ./out --limit 5
 
 ## Part 2: install the plugin
 
-1. Get `Inkwise.snplg` from the latest green CI run: **Actions → CI → newest run → Artifacts → Inkwise-snplg**. It downloads as a zip; the `.snplg` is inside.
+1. Get `Inkwise.snplg` from the latest green CI run: **Actions → CI → newest run → Artifacts → Inkwise-snplg-0.2.N**. It downloads as a zip; the `.snplg` is inside. Each build has its own version number, which the plugin list and the bottom of Inkwise settings both show, so you can tell which build is installed.
 2. Copy `Inkwise.snplg` into `MyStyle/` on the Manta.
 3. **Settings → Apps → Plugins → Add Plugin**, then choose Inkwise.
 

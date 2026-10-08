@@ -18,7 +18,7 @@ The plugin doesn't try to be a reader. Reading happens in the Supernote's built-
 
 ### Install
 
-1. Download `Inkwise.snplg` from the latest [CI run](../../actions/workflows/ci.yml) (artifact **Inkwise-snplg**) or from a [release](../../releases).
+1. Download `Inkwise.snplg` from the latest [CI run](../../actions/workflows/ci.yml) (artifact **Inkwise-snplg-&lt;version&gt;**) or from a [release](../../releases).
 2. Connect the Supernote over USB (or use your sync service) and copy the file into `MyStyle/`.
 3. On the device: **Settings → Apps → Plugins → Add Plugin**, pick Inkwise.
 4. Open Inkwise's settings from the plugin list and add your Readwise token. Either paste it (from [readwise.io/access_token](https://readwise.io/access_token)) or save it as `MyStyle/Inkwise/token.txt`, tap **Import token file**, and Inkwise deletes the file once it's imported.

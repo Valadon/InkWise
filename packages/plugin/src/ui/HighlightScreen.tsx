@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { BUILD } from '../buildInfo';
 import type { InkwiseApp } from '../services/app';
 import { highlightState, type HighlightOutcome } from '../services/quickSend';
 import { Button, Field, Line, Page, Quote, Row, Section } from './kit';
@@ -27,6 +28,7 @@ export function HighlightScreen({ app, onClose, onSettings }: { app: InkwiseApp;
       ) : (
         <ResultView key={`${result.docId}-${result.existing?.text ?? result.selection}`} app={app} result={result} onClose={onClose} onSettings={onSettings} />
       )}
+      <Line small>Inkwise {BUILD.version}</Line>
     </Page>
   );
 }

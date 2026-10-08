@@ -58,6 +58,10 @@ jobs:
       - name: Build core (the plugin typechecks against its declarations)
         run: npm ci && npx tsc -b packages/core
         working-directory: .
+      - name: Stamp the build's version
+        id: stamp
+        run: node scripts/stamp-plugin-version.mjs
+        working-directory: .
       - run: npm ci
       - run: npm run typecheck
       - name: Bundle check
@@ -78,7 +82,7 @@ jobs:
           unzip -l build/outputs/Inkwise.snplg
       - uses: actions/upload-artifact@v4
         with:
-          name: Inkwise-snplg
+          name: Inkwise-snplg-${{ steps.stamp.outputs.version }}
           path: packages/plugin/build/outputs/Inkwise.snplg
           if-no-files-found: error
 
@@ -92,7 +96,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: Inkwise-snplg
+          pattern: Inkwise-snplg-*
+          merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
           files: Inkwise.snplg
