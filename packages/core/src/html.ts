@@ -14,7 +14,7 @@ const KEEP = new Set([
   'pre', 'code', 'figure', 'figcaption', 'img', 'a', 'em', 'strong', 'i', 'b', 'u', 's',
   'sub', 'sup', 'small', 'mark', 'q', 'cite', 'abbr', 'del', 'ins', 'kbd', 'samp', 'var',
   'br', 'hr', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'caption',
-  'div', 'span', 'section', 'article', 'aside', 'header', 'footer', 'main', 'time',
+  'div', 'span', 'section', 'article', 'aside', 'header', 'footer', 'main',
 ]);
 
 /** Tags dropped together with everything inside them. */
@@ -38,7 +38,7 @@ const BLOCK = new Set([
 ]);
 
 /** Elements whose content model only allows phrasing content. */
-const PHRASING_ONLY = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre', 'dt', 'caption', 'span', 'a', 'em', 'strong', 'i', 'b', 'u', 's', 'sub', 'sup', 'small', 'mark', 'q', 'cite', 'abbr', 'code', 'kbd', 'samp', 'var', 'time']);
+const PHRASING_ONLY = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre', 'dt', 'caption', 'span', 'a', 'em', 'strong', 'i', 'b', 'u', 's', 'sub', 'sup', 'small', 'mark', 'q', 'cite', 'abbr', 'code', 'kbd', 'samp', 'var']);
 
 const ALLOWED_ATTRS: Record<string, string[]> = {
   a: ['href', 'title'],
@@ -50,10 +50,26 @@ const ALLOWED_ATTRS: Record<string, string[]> = {
   blockquote: ['cite'],
   q: ['cite'],
   abbr: ['title'],
-  time: ['datetime'],
-  del: ['datetime'],
-  ins: ['datetime'],
 };
+
+/**
+ * Elements that only accept certain children. Anything else that lands directly
+ * inside them gets wrapped in the implicit child (the value), which is what a
+ * browser does visually and what keeps epubcheck happy.
+ */
+const STRICT_CHILDREN: Record<string, { allowed: Set<string>; wrap: string }> = {
+  ul: { allowed: new Set(['li']), wrap: 'li' },
+  ol: { allowed: new Set(['li']), wrap: 'li' },
+  dl: { allowed: new Set(['dt', 'dd']), wrap: 'dd' },
+  table: { allowed: new Set(['caption', 'thead', 'tbody', 'tfoot', 'tr']), wrap: 'tr' },
+  thead: { allowed: new Set(['tr']), wrap: 'tr' },
+  tbody: { allowed: new Set(['tr']), wrap: 'tr' },
+  tfoot: { allowed: new Set(['tr']), wrap: 'tr' },
+  tr: { allowed: new Set(['td', 'th']), wrap: 'td' },
+};
+
+/** Implicit wrappers are recorded under this name, which no close tag matches. */
+const IMPLICIT = '#implicit';
 
 export interface CleanOptions {
   /** Base URL for resolving relative links and images (Reader's `source_url`). */
@@ -97,6 +113,39 @@ export function cleanHtml(html: string, opts: CleanOptions = {}): CleanResult {
     }
   };
 
+  /** The innermost element we actually emitted. */
+  const innermost = () => {
+    for (let i = open.length - 1; i >= 0; i--) if (open[i]!.tag !== null) return open[i]!;
+    return undefined;
+  };
+
+  /**
+   * Make room for `child` (a tag, or '#text'): close an implicit wrapper that a
+   * real child replaces, and open one when the parent wouldn't accept `child`.
+   */
+  const fitInto = (child: string) => {
+    // Step out of implicit wrappers when an ancestor takes `child` directly
+    // (a real <li> after loose text in a <ul>, a <tr> after a stray cell).
+    for (let i = open.length - 1; i >= 0; i--) {
+      const e = open[i]!;
+      if (e.tag === null) continue;
+      if (STRICT_CHILDREN[e.tag]?.allowed.has(child)) {
+        closeFrom(i + 1);
+        open.splice(i + 1);
+        break;
+      }
+      if (e.name !== IMPLICIT) break;
+    }
+    // Then open whatever wrappers the parent needs (at most tr then td).
+    for (let guard = 0; guard < 3; guard++) {
+      const tag = innermost()?.tag;
+      const rule = tag ? STRICT_CHILDREN[tag] : undefined;
+      if (!rule || rule.allowed.has(child)) return;
+      out.push(`<${rule.wrap}>`);
+      open.push({ name: IMPLICIT, tag: rule.wrap });
+    }
+  };
+
   const parser = new Parser(
     {
       onopentag(rawName, attribs) {
@@ -134,12 +183,25 @@ export function cleanHtml(html: string, opts: CleanOptions = {}): CleanResult {
           }
         }
         if (tag === 'li' && !insideEmitted('ul') && !insideEmitted('ol')) tag = 'p';
-        if ((tag === 'td' || tag === 'th' || tag === 'tr') && !insideEmitted('table')) tag = null;
+        if ((tag === 'dt' || tag === 'dd') && !insideEmitted('dl')) tag = 'p';
+        if (tag === 'figcaption' && !insideEmitted('figure')) tag = 'p';
+        // A caption is only valid as a table's first child.
+        if (tag === 'caption' && !(innermost()?.tag === 'table' && out[out.length - 1]?.startsWith('<table'))) {
+          tag = insideEmitted('table') ? null : 'p';
+        }
+        if ((tag === 'td' || tag === 'th' || tag === 'tr' || tag === 'thead' || tag === 'tbody' || tag === 'tfoot') && !insideEmitted('table')) tag = null;
+        if ((tag === 'header' || tag === 'footer') && (insideEmitted('header') || insideEmitted('footer'))) tag = 'div';
+        if (tag) fitInto(tag);
         if (tag) out.push(`<${tag}${renderAttrs(tag, attribs)}>`);
         open.push({ name, tag });
       },
       ontext(text) {
         if (dropDepth > 0) return;
+        const parent = innermost()?.tag;
+        if (parent && STRICT_CHILDREN[parent]) {
+          if (!text.trim()) return;
+          fitInto('#text');
+        }
         out.push(escapeText(text));
       },
       onclosetag(rawName) {
@@ -206,8 +268,14 @@ function renderAttrs(tag: string, attribs: Record<string, string>): string {
       s += ' reversed="reversed"';
       continue;
     }
-    if ((key === 'colspan' || key === 'rowspan' || key === 'start' || key === 'value') && !/^-?\d+$/.test(v.trim())) continue;
-    s += ` ${key}="${escapeAttr(v)}"`;
+    const t = v.trim();
+    if ((key === 'start' || key === 'value') && !/^-?\d+$/.test(t)) continue;
+    if (key === 'colspan' && !(/^\d+$/.test(t) && Number(t) >= 1 && Number(t) <= 1000)) continue;
+    if (key === 'rowspan' && !(/^\d+$/.test(t) && Number(t) <= 65534)) continue;
+    if (key === 'type' && !/^[1aAiI]$/.test(t)) continue;
+    if (key === 'scope' && !/^(row|col|rowgroup|colgroup)$/.test(t)) continue;
+    if (key === 'href' && !t) continue;
+    s += ` ${key}="${escapeAttr(key === 'colspan' || key === 'rowspan' || key === 'scope' || key === 'type' ? t : v)}"`;
   }
   return s;
 }
@@ -218,8 +286,19 @@ function safeHref(href: string | undefined, base?: string | null): string | null
   if (trimmed.startsWith('#')) return null; // in-page anchors point at ids we strip
   const abs = resolveUrl(trimmed, base);
   if (!abs) return null;
-  if (/^(https?:|mailto:)/i.test(abs)) return abs;
+  if (/^mailto:\s*$/i.test(abs)) return null;
+  if (/^(https?:|mailto:)/i.test(abs)) return encodeUnsafe(abs);
   return null;
+}
+
+/**
+ * Percent-encode what epubcheck rejects in a URL (spaces, pipes, braces, stray
+ * percent signs) while leaving valid escapes and everything else alone.
+ */
+export function encodeUnsafe(url: string): string {
+  return url
+    .replace(/%(?![0-9a-fA-F]{2})/g, '%25')
+    .replace(/[\s"<>\\^`{|}]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0'));
 }
 
 /** Minimal URL resolution; React Native's URL implementation is incomplete. */

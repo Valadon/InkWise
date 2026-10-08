@@ -10,7 +10,27 @@ import { HighlightScreen } from './src/ui/HighlightScreen';
 import { SettingsScreen } from './src/ui/SettingsScreen';
 import { SyncScreen } from './src/ui/SyncScreen';
 
-const jsonFetch: FetchLike = (url, init) => fetch(url, init) as unknown as ReturnType<FetchLike>;
+const REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * fetch with a timeout. A stalled connection would otherwise leave "Sending…" on
+ * screen forever. Timing out throws a TypeError, the same as a dropped
+ * connection, so the highlight gets queued for later.
+ */
+const jsonFetch: FetchLike = (url, init) => {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new TypeError('Network request timed out'));
+    }, REQUEST_TIMEOUT_MS);
+  });
+  const request = fetch(url, { ...init, signal: controller.signal }).catch((err: unknown) => {
+    throw err instanceof TypeError ? err : new TypeError(String(err));
+  });
+  return Promise.race([request, timeout]).finally(() => timer !== undefined && clearTimeout(timer)) as unknown as ReturnType<FetchLike>;
+};
 
 function createApp() {
   const app: InkwiseApp = new InkwiseApp(

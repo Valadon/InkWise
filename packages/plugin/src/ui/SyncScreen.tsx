@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import type { InkwiseApp } from '../services/app';
 import { Button, Line, Page, Row, Section } from './kit';
+import { usePressAction } from './usePress';
 
 const MAX_LINES = 8;
 
@@ -9,11 +10,7 @@ export function SyncScreen({ app, run, onClose, onSettings }: { app: InkwiseApp;
   const [result, setResult] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [needsToken, setNeedsToken] = useState(false);
-  const busyRef = useRef(false);
-
-  const sync = useCallback(async () => {
-    if (busyRef.current) return;
-    busyRef.current = true;
+  const sync = usePressAction(run, async () => {
     setBusy(true);
     setResult(null);
     setLines([]);
@@ -26,15 +23,9 @@ export function SyncScreen({ app, run, onClose, onSettings }: { app: InkwiseApp;
       const summary = await app.sync((line) => setLines((prev) => [...prev, line].slice(-MAX_LINES)));
       setResult(summary);
     } finally {
-      busyRef.current = false;
       setBusy(false);
     }
-  }, [app]);
-
-  // Each press of the Sync button (run changes) starts a sync.
-  useEffect(() => {
-    sync();
-  }, [run, sync]);
+  });
 
   return (
     <Page title="Sync Reader" onClose={onClose}>

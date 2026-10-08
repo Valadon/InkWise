@@ -76,7 +76,9 @@ function truncate(s: string, max: number): string {
 /** The Readwise id embedded in an Inkwise filename (or a full path), if any. */
 export function idFromFilename(pathOrName: string): string | null {
   const name = pathOrName.split(/[\\/]/).pop() ?? '';
-  const m = /__([A-Za-z0-9]+)\.epub$/i.exec(name);
+  // Reader ids are 20+ lowercase letters and digits (ULID-style). Requiring that
+  // shape keeps names like "Moby_Dick__gutenberg.epub" from looking like ours.
+  const m = /__([0-9a-z]{20,40})\.epub$/.exec(name);
   return m ? m[1]! : null;
 }
 

@@ -14,7 +14,8 @@ describe('filenames', () => {
     expect(sanitizeTitle('Double__underscore')).toBe('Double_underscore');
   });
   it('reads the id back from a filename or path', () => {
-    expect(idFromFilename('/storage/emulated/0/Document/Inkwise/Some-Title__01abcDEF.epub')).toBe('01abcDEF');
+    expect(idFromFilename('/storage/emulated/0/Document/Inkwise/Some-Title__01gm7jzr6yfqmyvb9n7bp0gvrq.epub')).toBe('01gm7jzr6yfqmyvb9n7bp0gvrq');
+    expect(idFromFilename('Moby_Dick__gutenberg.epub')).toBeNull();
     expect(idFromFilename('Some-Title.epub')).toBeNull();
     expect(idFromFilename('notes.pdf')).toBeNull();
   });

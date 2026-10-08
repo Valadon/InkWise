@@ -9,7 +9,8 @@ import { buildEpub } from '@inkwise/core';
 import { TINY_GIF, TINY_PNG } from '@inkwise/core/testing';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const fixtures = join(root, 'fixtures', 'documents');
+// documents/ feeds the tests too; epubcheck/ holds extra HTML-structure cases.
+const fixtureDirs = [join(root, 'fixtures', 'documents'), join(root, 'fixtures', 'epubcheck')];
 const out = join(root, 'out', 'epubcheck');
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
@@ -20,8 +21,8 @@ const images = new Map([
 ]);
 
 const files = [];
-for (const name of readdirSync(fixtures).filter((f) => f.endsWith('.json'))) {
-  const doc = JSON.parse(readFileSync(join(fixtures, name), 'utf8'));
+for (const name of fixtureDirs.flatMap((dir) => readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => join(dir, f)))) {
+  const doc = JSON.parse(readFileSync(name, 'utf8'));
   for (const withImages of [true, false]) {
     const epub = buildEpub(doc, { images, includeImages: withImages, modified: new Date('2026-10-08T00:00:00Z') });
     const file = join(out, `${withImages ? 'img' : 'noimg'}-${epub.filename}`);

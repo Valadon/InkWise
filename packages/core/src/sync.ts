@@ -2,7 +2,7 @@ import { buildEpub, epubFilename, idFromFilename } from './epub.js';
 import { flushPending, type FlushResult } from './highlights.js';
 import { collectImages, type ImageProcessor } from './images.js';
 import { extractImageUrls } from './html.js';
-import type { Manifest, ManifestStore } from './manifest.js';
+import { updateManifest, withManifestLock, type Manifest, type ManifestDocument, type ManifestStore } from './manifest.js';
 import type { OutputAdapter } from './output.js';
 import { NetworkError, ReadwiseClient, ReadwiseError } from './readwise.js';
 import type { FetchLike, ReaderDocument } from './types.js';
@@ -64,15 +64,27 @@ export async function syncReader(deps: SyncDeps, opts: SyncOptions = {}): Promis
   const say = deps.onProgress ?? (() => {});
   const warnings: string[] = [];
   const includeImages = opts.includeImages ?? true;
-  const manifest = await deps.manifest.load();
-
   // Anything queued offline goes first, so a highlight never waits behind a long sync.
   let highlights: FlushResult = { sent: 0, stillPending: 0, needsAttention: 0, archived: 0 };
-  if (!opts.dryRun && (manifest.pendingHighlights.length || manifest.pendingArchives?.length)) {
-    say('Sending saved highlights…');
-    highlights = await flushPending({ client: deps.client, manifest, now });
-    await deps.manifest.save(manifest);
-  }
+  // `manifest` is a snapshot for deciding what to write. Saves never write it back
+  // whole: they reload under the lock and change only the entries this sync owns,
+  // so highlights queued while the sync runs survive.
+  const manifest = await withManifestLock(async () => {
+    const m = await deps.manifest.load();
+    if (!opts.dryRun && (m.pendingHighlights.length || m.pendingArchives?.length)) {
+      say('Sending saved highlights…');
+      highlights = await flushPending({ client: deps.client, manifest: m, now });
+      await deps.manifest.save(m);
+    }
+    return m;
+  });
+  const setDoc = (id: string, entry: ManifestDocument) => {
+    manifest.documents[id] = entry;
+    if (opts.dryRun) return Promise.resolve();
+    return updateManifest(deps.manifest, (m) => {
+      m.documents[id] = entry;
+    });
+  };
 
   say('Fetching your Reader queue…');
   const docs = await deps.client.listDocuments({
@@ -105,7 +117,7 @@ export async function syncReader(deps: SyncDeps, opts: SyncOptions = {}): Promis
     if (!toWrite.includes(doc)) {
       if (!entry && onDisk) {
         // Written by the other Inkwise (CLI vs plugin). Track it, don't duplicate it.
-        manifest.documents[doc.id] = {
+        await setDoc(doc.id, {
           title,
           filename: onDisk,
           updatedAt: doc.updated_at,
@@ -114,7 +126,7 @@ export async function syncReader(deps: SyncDeps, opts: SyncOptions = {}): Promis
           author: doc.author,
           sourceUrl: doc.source_url,
           syncedAt: now().toISOString(),
-        };
+        });
         items.push({ id: doc.id, title, filename: onDisk, action: 'adopted' });
       } else {
         items.push({ id: doc.id, title, filename: onDisk ?? filename, action: 'skipped' });
@@ -145,7 +157,7 @@ export async function syncReader(deps: SyncDeps, opts: SyncOptions = {}): Promis
         if (onDisk && onDisk !== epub.filename && existingNames.has(onDisk) && deps.output.remove) {
           await deps.output.remove(onDisk);
         }
-        manifest.documents[doc.id] = {
+        await setDoc(doc.id, {
           title,
           filename: epub.filename,
           updatedAt: doc.updated_at,
@@ -154,8 +166,7 @@ export async function syncReader(deps: SyncDeps, opts: SyncOptions = {}): Promis
           author: doc.author,
           sourceUrl: doc.source_url,
           syncedAt: now().toISOString(),
-        };
-        await deps.manifest.save(manifest);
+        });
       }
       items.push({ id: doc.id, title, filename: epub.filename, action: isUpdate ? 'updated' : 'added' });
     } catch (err) {
@@ -166,6 +177,7 @@ export async function syncReader(deps: SyncDeps, opts: SyncOptions = {}): Promis
     }
   }
 
+  const statusChanges: Record<string, ManifestDocument['status']> = {};
   // Cleanup only when we saw the whole queue; if the limit cut the list short we can't tell what's missing.
   if (opts.removeMissing && (!opts.limit || docs.length < opts.limit)) {
     const current = new Set(docs.map((d) => d.id));
@@ -173,16 +185,16 @@ export async function syncReader(deps: SyncDeps, opts: SyncOptions = {}): Promis
       if (entry.status !== 'synced' || current.has(id)) continue;
       const name = existingById.get(id) ?? entry.filename;
       if (!existingNames.has(name)) {
-        entry.status = 'removed';
+        statusChanges[id] = 'removed';
         continue;
       }
       if (!opts.dryRun) {
         if (opts.removeMode === 'archive-folder' && deps.output.moveToSubfolder) {
           await deps.output.moveToSubfolder(name, 'Archive');
-          entry.status = 'archived';
+          statusChanges[id] = 'archived';
         } else if (deps.output.remove) {
           await deps.output.remove(name);
-          entry.status = 'removed';
+          statusChanges[id] = 'removed';
         } else {
           warnings.push(`${entry.title}: this target can't delete files; left in place.`);
           continue;
@@ -193,8 +205,12 @@ export async function syncReader(deps: SyncDeps, opts: SyncOptions = {}): Promis
   }
 
   if (!opts.dryRun) {
-    manifest.lastSyncAt = now().toISOString();
-    await deps.manifest.save(manifest);
+    await updateManifest(deps.manifest, (m) => {
+      for (const [id, status] of Object.entries(statusChanges)) {
+        if (m.documents[id]) m.documents[id]!.status = status;
+      }
+      m.lastSyncAt = now().toISOString();
+    });
   }
 
   const count = (a: SyncItemResult['action']) => items.filter((i) => i.action === a).length;

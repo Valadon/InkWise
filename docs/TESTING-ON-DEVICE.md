@@ -54,7 +54,7 @@ inkwise sync --target folder --out ./out --limit 5
 - [ ] **3.2** Alternative path: tap **Disconnect**, save the token as `MyStyle/Inkwise/token.txt`, then tap **Import token file**. Expect read and delete permission prompts, then a message that the file was deleted.
 
 ### Sync
-- [ ] **3.3** Tap **Sync Reader**. Expect a write permission prompt (choose Always), progress lines, then "Synced N new, 0 updated."
+- [ ] **3.3** Tap **Sync Reader**. Expect write and read permission prompts (choose Always for both), progress lines, then "Synced N new, 0 updated."
 - [ ] **3.4** Open `Document/Inkwise/` in the file browser. The articles are there and open in DOC.
 - [ ] **3.5** Tap **Sync Reader** again. Expect "Synced 0 new, 0 updated."
 
@@ -85,6 +85,7 @@ These are the open questions only a device can answer. If any of them goes wrong
 | Does the host allow `fetch` once Internet is granted? | Sync, highlights | "No connection to Readwise" even though Wi-Fi works. |
 | Do the button icons render? | Looks only | Blank icons. |
 | Does reopening the plugin view from a second button press re-run the action? | All buttons | Pressing Sync twice should sync twice. |
+| Does Reader's tag filter want the tag's display name or its lowercase key? | Sync with a tag set | A tag filter that finds nothing. Try the tag in lowercase. |
 
 ## If something breaks
 

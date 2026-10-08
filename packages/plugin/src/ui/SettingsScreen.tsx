@@ -11,13 +11,14 @@ export function SettingsScreen({ app, onClose }: { app: InkwiseApp; onClose: () 
   const [saved, setSaved] = useState<string | null>(null);
   const [queue, setQueue] = useState<{ pending: PendingHighlight[]; archives: number; titles: Record<string, string> } | null>(null);
   const [queueMsg, setQueueMsg] = useState<string | null>(null);
-  const [edits, setEdits] = useState<Record<number, string>>({});
+  const [edits, setEdits] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     setSettings(await app.settings());
     setConnected(await app.hasToken());
     setQueue(await app.queue());
+    setEdits({});
   }, [app]);
 
   useEffect(() => {
@@ -116,8 +117,11 @@ export function SettingsScreen({ app, onClose }: { app: InkwiseApp; onClose: () 
       <Section title="Highlight queue">
         {!queue || (!queue.pending.length && !queue.archives) ? <Line>Nothing waiting. Every highlight has been sent.</Line> : null}
         {queue?.archives ? <Line>{queue.archives} archive {queue.archives === 1 ? 'request' : 'requests'} waiting.</Line> : null}
-        {queue?.pending.map((h, i) => (
-          <Section key={`${h.docId}-${h.createdAt}-${i}`}>
+        {queue?.pending.map((h) => {
+          const key = { docId: h.docId, createdAt: h.createdAt };
+          const id = `${h.docId}-${h.createdAt}`;
+          return (
+          <Section key={id}>
             <Line small>
               {queue.titles[h.docId] ?? 'Unknown article'} · {h.state === 'pending' ? 'waiting to send' : 'needs attention'}
             </Line>
@@ -125,16 +129,17 @@ export function SettingsScreen({ app, onClose }: { app: InkwiseApp; onClose: () 
             {h.lastError ? <Line small>{h.lastError}</Line> : null}
             {h.state === 'needs_attention' ? (
               <>
-                <Field label="Fix the text to match the article" defaultValue={h.text} multiline onChangeText={(t) => setEdits((e) => ({ ...e, [i]: t }))} />
+                <Field label="Fix the text to match the article" defaultValue={h.text} multiline onChangeText={(t) => setEdits((e) => ({ ...e, [id]: t }))} />
                 <Row>
-                  <Button label="Try again" compact disabled={busy} onPress={() => run(() => app.review(i, 'retry', edits[i]), setQueueMsg)} />
-                  <Button label="Send standalone" compact disabled={busy} onPress={() => run(() => app.review(i, 'send_classic'), setQueueMsg)} />
-                  <Button label="Discard" compact disabled={busy} onPress={() => run(() => app.review(i, 'discard'), setQueueMsg)} />
+                  <Button label="Try again" compact disabled={busy} onPress={() => run(() => app.review(key, 'retry', edits[id]), setQueueMsg)} />
+                  <Button label="Send standalone" compact disabled={busy} onPress={() => run(() => app.review(key, 'send_classic'), setQueueMsg)} />
+                  <Button label="Discard" compact disabled={busy} onPress={() => run(() => app.review(key, 'discard'), setQueueMsg)} />
                 </Row>
               </>
             ) : null}
           </Section>
-        ))}
+          );
+        })}
         {queue?.pending.some((h) => h.state === 'pending') || queue?.archives ? (
           <Row>
             <Button label="Send queued now" disabled={busy} onPress={() => run(async () => ({ message: await app.flush() }), setQueueMsg)} />

@@ -121,7 +121,7 @@ describe('Sync Reader', () => {
     expect(await fs.exists(`${PRIVATE}/manifest.json`)).toBe(true);
     expect(names.some((n) => n.endsWith('.part'))).toBe(false);
     // Asked for network and write access, with an explanation.
-    expect(host.requests.map((r) => r.permission)).toEqual(['plugin.permission.INTERNET', 'plugin.permission.FILE:WRITE']);
+    expect(host.requests.map((r) => r.permission)).toEqual(['plugin.permission.INTERNET', 'plugin.permission.FILE:WRITE', 'plugin.permission.FILE:READ']);
     expect(host.requests[1]!.description).toContain('Document/Inkwise');
   });
 
@@ -223,7 +223,7 @@ describe('Send highlight', () => {
     const q = await app.queue();
     expect(q.pending).toHaveLength(1);
     expect(q.titles[longform.id]).toBe(longform.title);
-    const fixed = await app.review(0, 'retry', 'None of this is new.');
+    const fixed = await app.review({ docId: q.pending[0]!.docId, createdAt: q.pending[0]!.createdAt }, 'retry', 'None of this is new.');
     expect(fixed.status).toBe('sent');
     expect((await app.queue()).pending).toHaveLength(0);
   });

@@ -161,3 +161,27 @@ export function textManifestStore(io: { read(): Promise<string | null>; write(te
     },
   };
 }
+
+let lockTail: Promise<unknown> = Promise.resolve();
+
+/**
+ * Run `fn` with exclusive access to the manifest. Every read-modify-write of the
+ * manifest goes through here, so a sync running in the background can't save a
+ * stale copy over a highlight that was queued while it ran. Not reentrant: `fn`
+ * must not call another locked operation.
+ */
+export function withManifestLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = lockTail.then(fn, fn);
+  lockTail = run.catch(() => undefined);
+  return run;
+}
+
+/** Load, change and save the manifest under the lock. */
+export function updateManifest<T>(store: ManifestStore, fn: (m: Manifest) => T | Promise<T>): Promise<T> {
+  return withManifestLock(async () => {
+    const m = await store.load();
+    const out = await fn(m);
+    await store.save(m);
+    return out;
+  });
+}

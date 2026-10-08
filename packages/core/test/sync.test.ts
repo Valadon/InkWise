@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MemoryManifestStore, MemoryOutput, ReadwiseClient, epubFilename, syncReader } from '../src/index.js';
+import { MemoryManifestStore, MemoryOutput, ReadwiseClient, epubFilename, sendHighlight, syncReader } from '../src/index.js';
 import { FakeReadwise, TINY_GIF, TINY_PNG } from '../src/testing/fake-readwise.js';
 import { loadFixtures, noSleep } from './helpers.js';
 
@@ -32,6 +32,25 @@ describe('syncReader', () => {
     expect(progress.some((p) => p.startsWith('Writing 4/4'))).toBe(true);
     // Image fixture: one good PNG, one 404, one GIF.
     expect(r.warnings.some((w) => w.includes('missing.jpg'))).toBe(true);
+  });
+
+  it('keeps a highlight queued while the sync is running', async () => {
+    const { fake, client, manifest, deps } = setup();
+    const doc = fake.documents[0]!;
+    let sending: Promise<unknown> | null = null;
+    const r = await syncReader({
+      ...deps,
+      onProgress: (m) => {
+        if (m.startsWith('Writing 2/')) {
+          sending = sendHighlight({ client, manifest, filePath: epubFilename(doc), text: 'Words that are not in the article.' });
+        }
+      },
+    });
+    expect(sending).not.toBeNull();
+    expect(await sending).toMatchObject({ status: 'needs_attention' });
+    expect(r.added).toBe(4);
+    expect(manifest.manifest.pendingHighlights).toHaveLength(1);
+    expect(Object.keys(manifest.manifest.documents)).toHaveLength(4);
   });
 
   it('is idempotent and picks up updates', async () => {

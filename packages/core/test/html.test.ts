@@ -66,6 +66,29 @@ describe('cleanHtml', () => {
     expect(xhtml.match(/<a /g)?.length).toBe(1);
     expect(isBalanced(xhtml)).toBe(true);
   });
+  it('repairs list, table and definition-list structure', () => {
+    expect(cleanHtml('<ul><li>a</li><ul><li>b</li></ul></ul>').xhtml).toBe('<ul><li>a</li><li><ul><li>b</li></ul></li></ul>');
+    expect(cleanHtml('<ul>loose<li>x</li></ul>').xhtml).toBe('<ul><li>loose</li><li>x</li></ul>');
+    expect(cleanHtml('<table>stray<td>c</td><tr><td>r</td></tr></table>').xhtml).toBe(
+      '<table><tr><td>stray</td><td>c</td></tr><tr><td>r</td></tr></table>',
+    );
+    expect(cleanHtml('<dl><dt>t</dt>loose<dd>d</dd></dl>').xhtml).toBe('<dl><dt>t</dt><dd>loose</dd><dd>d</dd></dl>');
+    expect(cleanHtml('<dd>x</dd><figcaption>y</figcaption>').xhtml).toBe('<p>x</p><p>y</p>');
+  });
+
+  it('drops attribute values epubcheck rejects', () => {
+    expect(cleanHtml('<table><tr><td colspan="0" rowspan="-1">x</td><th scope="up">y</th></tr></table>').xhtml).toBe(
+      '<table><tr><td>x</td><th>y</th></tr></table>',
+    );
+    expect(cleanHtml('<ol type="z"><li>q</li></ol>').xhtml).toBe('<ol><li>q</li></ol>');
+    expect(cleanHtml('<time datetime="nope">then</time>').xhtml).toBe('then');
+  });
+
+  it('encodes unsafe link characters and drops empty mailto links', () => {
+    expect(cleanHtml('<a href="https://x.com/a b|c%zz">l</a>').xhtml).toBe('<a href="https://x.com/a%20b%7Cc%25zz">l</a>');
+    expect(cleanHtml('<a href="https://x.com/ok%20already">l</a>').xhtml).toBe('<a href="https://x.com/ok%20already">l</a>');
+    expect(cleanHtml('<a href="mailto:">m</a>').xhtml).toBe('m');
+  });
 });
 
 describe('resolveUrl', () => {

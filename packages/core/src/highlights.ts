@@ -1,6 +1,6 @@
 import { Parser } from 'htmlparser2';
 import { idFromFilename } from './epub.js';
-import { docIdForFilename, type Manifest, type ManifestStore, type PendingHighlight } from './manifest.js';
+import { docIdForFilename, withManifestLock, type Manifest, type ManifestStore, type PendingHighlight } from './manifest.js';
 import { highlightHash, highlightVariants, normalizeSelection, straighten } from './normalize.js';
 import { NetworkError, ReadwiseClient, ReadwiseError } from './readwise.js';
 
@@ -64,7 +64,11 @@ export async function resolveDocId(
  * The Send highlight button. Never loses a highlight: anything that can't be sent
  * now is queued in the manifest, either to retry later or for the user to review.
  */
-export async function sendHighlight(input: SendHighlightInput): Promise<SendResult> {
+export function sendHighlight(opts: Parameters<typeof sendHighlightUnlocked>[0]): ReturnType<typeof sendHighlightUnlocked> {
+  return withManifestLock(() => sendHighlightUnlocked(opts));
+}
+
+async function sendHighlightUnlocked(input: SendHighlightInput): Promise<SendResult> {
   const now = input.now ?? (() => new Date());
   const text = normalizeSelection(input.text ?? '');
   if (!text) return { status: 'empty', message: 'Select some text first, then tap Send highlight.' };
@@ -216,7 +220,11 @@ async function finish(
  * Attach a note after the fact: on Readwise if the highlight was sent, or on the
  * queued copy if it's still waiting.
  */
-export async function addNoteToHighlight(opts: {
+export function addNoteToHighlight(opts: Parameters<typeof addNoteToHighlightUnlocked>[0]): ReturnType<typeof addNoteToHighlightUnlocked> {
+  return withManifestLock(() => addNoteToHighlightUnlocked(opts));
+}
+
+async function addNoteToHighlightUnlocked(opts: {
   client: ReadwiseClient;
   manifest: ManifestStore;
   docId: string;
@@ -317,19 +325,31 @@ export async function flushPending(opts: {
 /** What the settings view can do with a highlight that needs attention. */
 export type ReviewAction = 'retry' | 'send_classic' | 'discard';
 
-export async function resolveNeedsAttention(opts: {
+export function resolveNeedsAttention(opts: Parameters<typeof resolveNeedsAttentionUnlocked>[0]): ReturnType<typeof resolveNeedsAttentionUnlocked> {
+  return withManifestLock(() => resolveNeedsAttentionUnlocked(opts));
+}
+
+async function resolveNeedsAttentionUnlocked(opts: {
   client: ReadwiseClient;
   manifest: ManifestStore;
-  index: number;
+  /** Position in the queue; ignored when `key` is given. */
+  index?: number;
   action: ReviewAction;
   /** Optional corrected text when retrying. */
   text?: string;
+  /** Identifies the highlight independent of its position in the queue. */
+  key?: { docId: string; createdAt: string };
 }): Promise<SendResult> {
   const manifest = await opts.manifest.load();
-  const p = manifest.pendingHighlights[opts.index];
+  // Prefer the stable key: the queue may have changed since the list was drawn.
+  const index =
+    opts.key != null
+      ? manifest.pendingHighlights.findIndex((h) => h.docId === opts.key!.docId && h.createdAt === opts.key!.createdAt)
+      : opts.index ?? -1;
+  const p = index >= 0 ? manifest.pendingHighlights[index] : undefined;
   if (!p) return { status: 'empty', message: 'That highlight is no longer in the queue.' };
   if (opts.action === 'discard') {
-    manifest.pendingHighlights.splice(opts.index, 1);
+    manifest.pendingHighlights.splice(index, 1);
     await opts.manifest.save(manifest);
     return { status: 'sent', message: 'Highlight removed from the queue.', docId: p.docId };
   }
@@ -351,14 +371,14 @@ export async function resolveNeedsAttention(opts: {
         docId: p.docId,
       };
     }
-    manifest.pendingHighlights.splice(opts.index, 1);
+    manifest.pendingHighlights.splice(index, 1);
     manifest.sentHighlightHashes.push(highlightHash(p.docId, p.text));
     await opts.manifest.save(manifest);
     return { status: 'sent', message: 'Saved to Readwise as a standalone highlight.', docId: p.docId };
   }
   if (opts.text) p.text = normalizeSelection(opts.text);
   const outcome = await attemptSend(opts.client, p);
-  manifest.pendingHighlights.splice(opts.index, 1);
+  manifest.pendingHighlights.splice(index, 1);
   return finish(opts.manifest, manifest, { ...p, state: 'pending' }, outcome, highlightHash(p.docId, p.text));
 }
 
@@ -372,7 +392,11 @@ export interface ArchiveResult {
  * The Done button: flush this document's highlights, then archive it in Reader.
  * Offline, the archive is queued and happens on the next sync.
  */
-export async function archiveDocument(opts: {
+export function archiveDocument(opts: Parameters<typeof archiveDocumentUnlocked>[0]): ReturnType<typeof archiveDocumentUnlocked> {
+  return withManifestLock(() => archiveDocumentUnlocked(opts));
+}
+
+async function archiveDocumentUnlocked(opts: {
   client: ReadwiseClient;
   manifest: ManifestStore;
   filePath: string;

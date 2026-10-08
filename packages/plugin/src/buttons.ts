@@ -16,6 +16,7 @@ type Listener = (screen: Screen) => void;
 class ScreenStore {
   private current: Screen = 'sync';
   private seq = 0;
+  private handled = 0;
   private listeners = new Set<Listener>();
 
   get screen() {
@@ -25,6 +26,16 @@ class ScreenStore {
   /** Increments on every press, so the same button pressed twice still re-runs its action. */
   get pressCount() {
     return this.seq;
+  }
+
+  /**
+   * True the first time a press is seen. Screens remount (after visiting
+   * settings, say) and must not redo the action for a press already handled.
+   */
+  claim(press: number): boolean {
+    if (press <= this.handled) return false;
+    this.handled = press;
+    return true;
   }
 
   set(screen: Screen) {

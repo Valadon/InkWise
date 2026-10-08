@@ -1,23 +1,18 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import type { InkwiseApp } from '../services/app';
 import { Line, Page, Section } from './kit';
+import { usePressAction } from './usePress';
 
 export function DoneScreen({ app, run, onClose }: { app: InkwiseApp; run: number; onClose: () => void }) {
   const [message, setMessage] = useState<string | null>(null);
-  const busy = useRef(false);
-
-  useEffect(() => {
-    if (busy.current) return;
-    busy.current = true;
+  usePressAction(run, async () => {
     setMessage(null);
-    app
-      .done()
-      .then((r) => setMessage(r.message))
-      .catch((err) => setMessage(err instanceof Error ? err.message : String(err)))
-      .finally(() => {
-        busy.current = false;
-      });
-  }, [app, run]);
+    try {
+      setMessage((await app.done()).message);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err));
+    }
+  });
 
   return (
     <Page title="Done" onClose={onClose}>

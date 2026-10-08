@@ -40,7 +40,7 @@ Inkwise asks for each one the first time it's needed, and says why.
 | --- | --- |
 | Internet | Talking to Readwise |
 | File write | Saving EPUBs into `Document/Inkwise` |
-| File read | Reading a renamed EPUB's id, importing `token.txt` |
+| File read | Seeing which articles are already in the folder, reading a renamed EPUB's id, importing `token.txt` |
 | File delete | Deleting `token.txt` after import, and the optional delete-on-Done setting |
 
 The token, the manifest and the highlight queue live in the plugin's private folder. Nothing syncs to the cloud, and none of it appears in your files.

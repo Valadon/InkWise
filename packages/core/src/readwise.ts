@@ -106,7 +106,7 @@ export class ReadwiseClient {
   async listDocuments(opts: ListOptions = {}): Promise<ReaderDocument[]> {
     const out: ReaderDocument[] = [];
     let cursor: string | null = null;
-    const pageSize = Math.min(100, Math.max(1, opts.pageSize ?? 100));
+    const pageSize = Math.min(100, Math.max(1, opts.pageSize ?? opts.limit ?? 100));
     do {
       const params = new URLSearchParamsLite();
       if (opts.location) params.set('location', opts.location);

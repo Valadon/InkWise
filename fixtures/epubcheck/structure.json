@@ -1,0 +1,20 @@
+{
+  "id": "01fixturestructure0000000a",
+  "url": "https://read.readwise.io/read/01fixturestructure0000000a",
+  "source_url": "https://example.com/structure",
+  "title": "Structure the Web Gets Wrong",
+  "author": "Pat Q. Writer",
+  "category": "article",
+  "location": "later",
+  "tags": {},
+  "site_name": "Example News",
+  "word_count": 200,
+  "reading_time": "1 min",
+  "created_at": "2026-10-05T12:00:00.000000+00:00",
+  "updated_at": "2026-10-05T12:00:00.000000+00:00",
+  "published_date": "2026-10-05T09:00:00+00:00",
+  "content": null,
+  "parent_id": null,
+  "notes": "",
+  "html_content": "<h1>Structure the web gets wrong</h1><p>Every case below is something a real page has done.</p><ul><li>First item</li><ul><li>A list nested straight inside a list</li></ul><li>Last item</li></ul><ul>Text sitting loose in a list<li>An item after it</li></ul><table>A stray cell<td>Another cell</td><tr><td colspan=\"0\" rowspan=\"-1\">Bad spans</td><th scope=\"sideways\">Bad scope</th></tr><caption>A caption in the wrong place</caption></table><dl><dt>Term</dt>Loose definition text<dd>Definition</dd></dl><dd>An orphaned definition</dd><figcaption>A caption with no figure</figcaption><header><header>A header inside a header</header></header><p>Published <time datetime=\"last tuesday\">last Tuesday</time>.</p><p><a href=\"https://example.com/a path|with%zzjunk\">A link with spaces and pipes</a> and <a href=\"mailto:\">an empty mailto</a>.</p><ol type=\"z\" start=\"3\"><li>An ordered list with a bad type</li></ol>"
+}

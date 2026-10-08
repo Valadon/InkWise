@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import type { SendResult } from '@inkwise/core';
 import type { InkwiseApp } from '../services/app';
 import { Button, Field, Line, Page, Quote, Row, Section } from './kit';
+import { usePressAction } from './usePress';
 
 const PREVIEW_CHARS = 280;
 
@@ -10,22 +11,16 @@ export function HighlightScreen({ app, run, onClose, onSettings }: { app: Inkwis
   const [note, setNote] = useState('');
   const [noteResult, setNoteResult] = useState<string | null>(null);
   const [savingNote, setSavingNote] = useState(false);
-  const busy = useRef(false);
-
-  useEffect(() => {
-    if (busy.current) return;
-    busy.current = true;
+  usePressAction(run, async () => {
     setResult(null);
     setNote('');
     setNoteResult(null);
-    app
-      .sendSelection()
-      .then(setResult)
-      .catch((err) => setResult({ status: 'needs_attention', message: err instanceof Error ? err.message : String(err) }))
-      .finally(() => {
-        busy.current = false;
-      });
-  }, [app, run]);
+    try {
+      setResult(await app.sendSelection());
+    } catch (err) {
+      setResult({ status: 'needs_attention', message: err instanceof Error ? err.message : String(err) });
+    }
+  });
 
   const canNote = result && result.docId && (result.status === 'sent' || result.status === 'queued_offline');
   const text = result?.sentText ?? result?.selection ?? '';

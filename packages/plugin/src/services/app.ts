@@ -10,6 +10,7 @@ import {
   sendHighlight,
   syncReader,
   textManifestStore,
+  updateManifest,
   type FetchLike,
   type ManifestStore,
   type OutputAdapter,
@@ -102,7 +103,13 @@ export class InkwiseApp {
     const fs = this.fs;
     return textManifestStore({
       async read() {
-        return (await fs.exists(path)) ? fs.readText(path) : null;
+        const main = (await fs.exists(path)) ? await fs.readText(path) : null;
+        if (main === null || parses(main)) return main;
+        // Corrupt manifest: keep a copy for diagnosis, then fall back to the last
+        // complete write if one is lying around.
+        await fs.writeText(`${path}.corrupt`, main).catch(() => {});
+        const tmp = (await fs.exists(`${path}.tmp`)) ? await fs.readText(`${path}.tmp`) : null;
+        return tmp !== null && parses(tmp) ? tmp : main;
       },
       async write(text) {
         // Write then rename, so a crash mid-write can't corrupt the queue.
@@ -211,6 +218,8 @@ export class InkwiseApp {
     try {
       await this.ensure('plugin.permission.INTERNET');
       await this.ensure('plugin.permission.FILE:WRITE');
+      // Listing Document/Inkwise is how sync spots files the CLI already wrote.
+      await this.ensure('plugin.permission.FILE:READ');
       const settings = await this.settings();
       if (settings.removeMissing) await this.ensure('plugin.permission.FILE:DELETE');
       const client = await this.client();
@@ -279,7 +288,7 @@ export class InkwiseApp {
     const filePath = await this.host.currentFilePath();
     if (!filePath) return { ok: false, message: "This document isn't from Readwise." };
     const manifest = await this.manifest();
-    const docId = await resolveDocId(await manifest.load(), filePath);
+    const docId = await resolveDocId(await manifest.load(), filePath, (p) => this.readIdentifier(p));
     if (!docId) return { ok: false, message: "This document isn't from Readwise." };
     try {
       await this.ensure('plugin.permission.INTERNET');
@@ -327,17 +336,16 @@ export class InkwiseApp {
     return { pending: m.pendingHighlights, archives: m.pendingArchives?.length ?? 0, titles };
   }
 
-  async review(index: number, action: ReviewAction, text?: string) {
-    return resolveNeedsAttention({ client: await this.client(), manifest: await this.manifest(), index, action, text });
+  /** `key` is the highlight's docId and createdAt, which stay put when the queue changes. */
+  async review(key: { docId: string; createdAt: string }, action: ReviewAction, text?: string) {
+    return resolveNeedsAttention({ client: await this.client(), manifest: await this.manifest(), key, action, text });
   }
 
   /** Send everything queued without a full sync. */
   async flush(): Promise<string> {
     try {
-      const manifest = await this.manifest();
-      const m = await manifest.load();
-      const r = await flushPending({ client: await this.client(), manifest: m });
-      await manifest.save(m);
+      const client = await this.client();
+      const r = await updateManifest(await this.manifest(), (m) => flushPending({ client, manifest: m }));
       if (!r.sent && !r.archived && r.stillPending) return 'Still offline. Everything stays queued.';
       return `Sent ${r.sent} ${r.sent === 1 ? 'highlight' : 'highlights'}${r.archived ? `, archived ${r.archived}` : ''}.`;
     } catch (err) {
@@ -377,6 +385,15 @@ export class InkwiseApp {
         await fs.move(joinPath(dir, filename), joinPath(dir, subfolder, filename));
       },
     };
+  }
+}
+
+function parses(text: string): boolean {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
   }
 }
 

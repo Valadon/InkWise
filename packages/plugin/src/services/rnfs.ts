@@ -26,8 +26,15 @@ export const rnfs: DeviceFs = {
     await RNFS.writeFile(path, bytesToBase64(bytes), 'base64');
   },
   async move(from, to) {
-    if (await RNFS.exists(to)) await RNFS.unlink(to);
-    await RNFS.moveFile(from, to);
+    // A rename replaces the target in one step on Android, so the old file is
+    // never missing. Only if that fails do we clear the target and try again.
+    try {
+      await RNFS.moveFile(from, to);
+    } catch (err) {
+      if (!(await RNFS.exists(to))) throw err;
+      await RNFS.unlink(to);
+      await RNFS.moveFile(from, to);
+    }
   },
   async unlink(path) {
     if (await RNFS.exists(path)) await RNFS.unlink(path);
