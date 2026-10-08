@@ -43,12 +43,14 @@ describe('Librarian', () => {
   });
 });
 
-// A stand-in for xovi-message-broker with librarian: same pipes, same blocking
-// behaviour, and no reply for a signal nobody handles.
+// A stand-in for xovi-message-broker with librarian: same pipes, a reader
+// always open on the request pipe (the real broker never closes its old ones),
+// a reply only once someone reads it, and no reply for a signal nobody handles.
 const BROKER = `
+exec 3<>"$1"
 i=0
 while [ $i -lt "$3" ]; do
-  IFS= read -r line < "$1"
+  IFS= read -r line <&3
   case "$line" in
     '>elookupEntry:'*) printf '%s' "\${line#>elookupEntry:}" > "$2" ;;
     '>erescanLibrary:') printf '2' > "$2" ;;

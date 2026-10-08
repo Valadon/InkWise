@@ -1,0 +1,3 @@
+#!/bin/sh
+# AppLoad starts this with the path of the app's socket.
+exec "$(dirname "$0")/inkwise-rm" appload "$@"

@@ -1,0 +1,8 @@
+{
+    "id": "inkwise",
+    "name": "InkWise",
+    "loadsBackend": true,
+    "entry": "/ui/main.qml",
+    "supportsScaling": true,
+    "canHaveMultipleFrontends": false
+}

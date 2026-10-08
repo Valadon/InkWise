@@ -1,14 +1,10 @@
 import { spawnSync } from 'node:child_process';
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
-import { ReadwiseClient, describeSyncError, summarize, syncReader, textManifestStore, type FetchLike } from '@inkwise/core';
-import { FakeReadwise } from '@inkwise/core/testing';
-import { sendDeviceHighlights } from './highlightSync.js';
+import { describeSyncError, textManifestStore } from '@inkwise/core';
 import { Librarian } from './librarian.js';
 import { highlightColorName } from './rmHighlights.js';
-import { SAMPLE_DOCUMENT } from './sample.js';
+import { NoToken, SyncBusy, inkwisePaths, loadLastSync, loadSettings, readText, runSync, saveToken, writeText } from './runner.js';
 import { XOCHITL_DIR, XochitlOutput } from './xochitl.js';
 
 const VERSION = process.env.INKWISE_VERSION ?? 'dev';
@@ -40,49 +36,6 @@ class UserError extends Error {}
 const home = () => process.env.INKWISE_DIR ?? '/home/root/.local/share/inkwise';
 const library = () => process.env.XOCHITL_DIR ?? XOCHITL_DIR;
 
-/** Mock runs keep their own state so the test article never mixes with real ones. */
-function paths(mock: boolean) {
-  const base = mock ? join(home(), 'mock') : home();
-  return { token: join(home(), 'token'), manifest: join(base, 'manifest.json'), library: join(base, 'library.json') };
-}
-
-async function readText(path: string): Promise<string | null> {
-  try {
-    return await readFile(path, 'utf8');
-  } catch (err: any) {
-    if (err?.code === 'ENOENT') return null;
-    throw err;
-  }
-}
-
-async function writeText(path: string, text: string) {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(`${path}.tmp`, text);
-  await rename(`${path}.tmp`, path);
-}
-
-const realFetch: FetchLike = (url, init) => fetch(url, init as RequestInit) as any;
-
-/** `link`: look for librarian (a quick probe of the reading app). */
-async function setup(mock: boolean, link = true) {
-  const p = paths(mock);
-  let client: ReadwiseClient;
-  let imageFetch: FetchLike | undefined = realFetch;
-  if (mock) {
-    const fake = new FakeReadwise({ documents: [SAMPLE_DOCUMENT] });
-    client = new ReadwiseClient({ token: fake.token, fetch: fake.fetch, sleep: async () => {} });
-    imageFetch = undefined;
-  } else {
-    const token = (process.env.READWISE_TOKEN ?? (await readText(p.token)) ?? '').trim();
-    if (!token) throw new UserError('No Readwise token yet. Run: inkwise-rm connect');
-    client = new ReadwiseClient({ token, fetch: realFetch, onRateLimit: (s) => console.log(`Readwise asked us to wait ${s}s…`) });
-  }
-  const manifest = textManifestStore({ read: () => readText(p.manifest), write: (t) => writeText(p.manifest, t) });
-  const librarian = link ? await Librarian.connect() : null;
-  const output = new XochitlOutput({ dir: library(), stateFile: p.library, library: librarian });
-  return { client, manifest, output, imageFetch, librarian };
-}
-
 const LIBRARIAN_TIP = 'Tip: install "librarian" in reManager and InkWise won\'t need to restart the reading app.';
 
 async function connect(tokenArg?: string) {
@@ -93,11 +46,7 @@ async function connect(tokenArg?: string) {
     rl.close();
   }
   if (!token) throw new UserError('No token given.');
-  const ok = await new ReadwiseClient({ token, fetch: realFetch }).validateToken();
-  if (!ok) throw new UserError('Readwise rejected that token. Copy it again from readwise.io/access_token.');
-  const p = paths(false).token;
-  await writeText(p, token);
-  await chmod(p, 0o600);
+  if (!(await saveToken(home(), token))) throw new UserError('Readwise rejected that token. Copy it again from readwise.io/access_token.');
   console.log('Connected to Readwise.');
 }
 
@@ -108,58 +57,33 @@ function restartReader() {
 }
 
 async function sync(v: { limit?: string; location?: string; mock?: boolean; 'dry-run'?: boolean; 'no-restart'?: boolean }) {
-  const mock = !!v.mock;
   const dryRun = !!v['dry-run'];
   const limit = v.limit ? Number(v.limit) : undefined;
   if (limit !== undefined && !(limit > 0)) throw new UserError('--limit needs a number above 0.');
-  const { client, manifest, output, imageFetch, librarian } = await setup(mock);
-
-  let failure: unknown;
-  try {
-    if (!dryRun) {
-      const sent = await sendDeviceHighlights({
-        client,
-        manifest,
-        output,
-        onHighlight: (_file, h, status) => {
-          if (status !== 'duplicate') console.log(`  [${status}] (${highlightColorName(h)}) ${h.text.replace(/\s+/g, ' ')}`);
-        },
-      });
-      const c = sent.counts;
-      console.log(`Highlights: ${c.sent ?? 0} sent, ${c.duplicate ?? 0} already in Readwise, ${(c.queued_offline ?? 0) + (c.needs_attention ?? 0)} waiting.`);
-    }
-
-    const result = await syncReader(
-      { client, output, manifest, fetchImages: imageFetch, onProgress: (m) => console.log(`  ${m}`) },
-      { location: v.location ?? 'later', limit, dryRun, showHighlights: false, includeImages: !!imageFetch },
-    );
-    for (const w of result.warnings) console.log(`  warning: ${w}`);
-    // Reader bumps an article whenever it gets a highlight, so core asks to rebuild it;
-    // books already opened on the tablet are left as they are (see XochitlOutput.put).
-    const kept = result.items.filter((i) => i.action === 'updated' && output.kept.has(i.filename)).length;
-    let line = summarize({ ...result, updated: result.updated - kept }, dryRun);
-    if (kept) line += ` Left ${kept} ${kept === 1 ? 'article' : 'articles'} you've opened as ${kept === 1 ? 'it is' : 'they are'}.`;
-    console.log(line);
-  } catch (err) {
-    failure = err;
-  }
-
-  // Even after a failure, whatever did get written should show up.
+  const res = await runSync({
+    home: home(),
+    library: library(),
+    mock: !!v.mock,
+    limit,
+    location: v.location,
+    dryRun,
+    onLine: (line) => console.log(`  ${line}`),
+  });
+  if (res.ok) console.log(res.summary);
   if (!dryRun) {
-    await output.finish();
-    if (output.needsRestart) {
+    if (res.waitingForRestart) {
       if (v['no-restart']) console.log('New articles will show up after the reading app restarts.');
       else restartReader();
-      if (!librarian) console.log(LIBRARIAN_TIP);
-    } else if (output.changed) {
+      if (!res.librarian) console.log(LIBRARIAN_TIP);
+    } else if (res.changed) {
       console.log('The library is up to date, no restart needed.');
     }
   }
-  if (failure) throw failure;
+  if (!res.ok) throw res.error;
 }
 
 async function showHighlights(mock: boolean) {
-  const { output } = await setup(mock, false);
+  const output = new XochitlOutput({ dir: library(), stateFile: inkwisePaths(home(), mock).library });
   const docs = await output.documents();
   if (!docs.length) console.log('No InkWise articles on the tablet yet.');
   for (const { filename, uuid } of docs) {
@@ -172,19 +96,25 @@ async function showHighlights(mock: boolean) {
 }
 
 async function status(mock: boolean) {
-  const { manifest, output, librarian } = await setup(mock);
+  const p = inkwisePaths(home(), mock);
+  const output = new XochitlOutput({ dir: library(), stateFile: p.library });
+  const manifest = textManifestStore({ read: () => readText(p.manifest), write: (t) => writeText(p.manifest, t) });
   const docs = await output.documents();
   const m = await manifest.load();
+  const settings = await loadSettings(home());
+  const last = await loadLastSync(home(), mock);
   console.log(`InkWise ${VERSION}. ${docs.length} InkWise article(s) on the tablet.`);
   console.log(
-    librarian
+    (await Librarian.connect())
       ? 'librarian found: new articles show up without restarting the reading app.'
       : 'librarian not found: new articles need a reading-app restart. Install "librarian" in reManager to skip that.',
   );
-  const waiting = m.pendingHighlights.filter((p) => p.state === 'pending').length;
-  const stuck = m.pendingHighlights.filter((p) => p.state === 'needs_attention');
+  if (last) console.log(`Last sync ${last.at.replace('T', ' ').slice(0, 16)} UTC: ${last.summary}`);
+  console.log(`Automatic sync (in the InkWise app): ${settings.autoSyncMinutes ? `every ${settings.autoSyncMinutes} min` : 'off'}, from ${settings.location}.`);
+  const waiting = m.pendingHighlights.filter((h) => h.state === 'pending').length;
+  const stuck = m.pendingHighlights.filter((h) => h.state === 'needs_attention');
   console.log(`${waiting} highlight(s) waiting to send, ${stuck.length} Readwise couldn't match.`);
-  for (const p of stuck) console.log(`  ${p.text.slice(0, 100)}`);
+  for (const h of stuck) console.log(`  ${h.text.slice(0, 100)}`);
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
@@ -208,10 +138,14 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     else if (cmd === 'sync') await sync(v);
     else if (cmd === 'highlights') await showHighlights(!!v.mock);
     else if (cmd === 'status') await status(!!v.mock);
-    else console.log(HELP);
+    else if (cmd === 'appload' && arg) {
+      // Started by AppLoad as the tablet app's backend, with its socket path.
+      const { runBackend } = await import('./backend.js');
+      await runBackend({ socketPath: arg, home: home(), library: library(), version: VERSION });
+    } else console.log(HELP);
     return 0;
   } catch (err) {
-    console.error(err instanceof UserError ? err.message : describeSyncError(err));
+    console.error(err instanceof UserError || err instanceof NoToken || err instanceof SyncBusy ? err.message : describeSyncError(err));
     return 1;
   }
 }

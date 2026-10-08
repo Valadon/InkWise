@@ -1,6 +1,6 @@
 # InkWise on reMarkable: investigation
 
-Status: research plus a first piece of code (the highlight reader). Written 2026-10-08 for the Paper Pro and Paper Pro Move with reManager installed.
+Status: a working prototype (command line and an AppLoad app), tested on a Paper Pro with real Readwise. Written 2026-10-08 for the Paper Pro and Paper Pro Move with reManager installed.
 
 ## Has anyone done this already?
 
@@ -54,6 +54,18 @@ xochitl reads its library folder when it starts and doesn't notice files added l
 
 A book is never replaced once it's been opened (it has page files, a saved layout, or a `lastOpened` time): replacing it would move annotations onto the wrong words or pull it out from under the reader. A never-opened book is overwritten in place, which needs no restart because xochitl only reads the EPUB when the book is first opened.
 
+## The tablet app
+
+`packages/remarkable/app/` is an AppLoad app (build it with `scripts/build-app.sh`, which needs bun and Qt 6's `rcc`). It installs as one folder, `/home/root/xovi/exthome/appload/inkwise/`:
+
+- `ui/main.qml` (compiled into `resources.rcc`): last sync, Sync now, automatic sync (off, 15, 30 or 60 minutes), which Reader location to pull, the token field, whether librarian is installed, and recent activity. Plain black and white, sized in millimetres so it reads the same on the Paper Pro and the Move. It only draws state; it never does work itself.
+- `backend/entry` runs `backend/inkwise-rm appload <socket>` (`src/backend.ts`). AppLoad's socket is `SOCK_SEQPACKET`, which Node and Bun can't open, so `src/appload.ts` gets it from libc through `bun:ffi` and then reads and writes packets with plain file calls. The screen sends small JSON requests; the backend answers each with the whole state.
+- The backend keeps running after the screen closes and syncs on its own: on the chosen interval while the tablet is awake, and about 15 seconds after it wakes up (it notices wall-clock time jumping between its 30-second ticks). After failing to reach Readwise it tries again within 5 minutes. With automatic sync off, closing the screen stops the backend.
+- It never restarts the reading app: it runs inside it, and you might be mid-page. Without librarian, new articles wait for the next restart.
+- The terminal command and the app share one sync routine (`src/runner.ts`), one lock file (so they never sync at the same time), and the same state, so articles are never added twice.
+
+Limit: AppLoad starts the backend when the app is opened, so after the tablet (or the reading app) restarts, automatic sync resumes once InkWise is opened again. A systemd timer would remove that, at the cost of writing to the read-only system partition; Vellum's `systemdunits` support is the clean way to do it once this ships as a package.
+
 ## What changes from the Supernote UX
 
 - **No Send button needed, at first.** Every highlight syncs automatically. That is closer to how Kindle and Kobo work with Readwise. A "send only this one" button in the highlight menu would mean a QML patch to xochitl, which breaks more often across firmware updates. Possible later.
@@ -78,7 +90,7 @@ Use the reMarkable cloud API (like rmapi) from a server or scheduled job instead
 3. ~~Document writer~~ Done, against a fake library folder: `xochitl.ts` (`XochitlOutput`) puts Reader EPUBs in an "Inkwise" folder, archives to "Inkwise/Archive", sends removed ones to the tablet's trash, and never replaces a book that has annotations. `highlightSync.ts` sends every highlight on every Inkwise book to Readwise; a full round trip passes against the fake Readwise API.
 4. ~~Check the `.metadata`/`.content` we write against a real one~~ Done against Lance's Paper Pro on software 3.28.0.172: metadata now has the same fields, and EPUBs still use the flat `pages` list (`formatVersion: 1`), which `pageOrder` reads. The `.pdf` xochitl renders from an EPUB has broken ligature mappings ("E cient", "o site"), which is where the garbled highlight text comes from; we match against the EPUB text instead.
 5. ~~Device runtime~~ Done: `inkwise-rm`, one aarch64 binary (`bun build --compile`). Tested on Lance's Paper Pro with real Readwise. Uses librarian when it's installed; otherwise restarts xochitl only when `XochitlOutput.needsRestart` is set.
-6. AppLoad screen (Connect, Sync now, last result) and automatic syncing.
-7. Vellum package so it installs from reManager, depending on `librarian`.
+6. ~~AppLoad screen and automatic syncing~~ Built (0.2.0-test1), checked on desktop Qt at both tablets' screen sizes and against a stand-in for AppLoad's socket. Needs a device test.
+7. Vellum package so it installs from reManager, depending on `appload` and `librarian`. Vellum doesn't take pull requests written by AI agents, so the submission has to come from Lance.
 
 Open questions: whether growing an existing highlight should replace the old one in Readwise (today it adds a second one).
