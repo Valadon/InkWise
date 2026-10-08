@@ -96,7 +96,7 @@ describe('markEpub', () => {
     const r = markEpub(old, ['None of this is new.'])!;
     const after = strFromU8(unzipSync(r.bytes)['OEBPS/style.css']!);
     expect(after.match(/span\.rw-hl/g)).toHaveLength(1);
-    expect(after).not.toContain('underline; }\n');
+    expect(after).not.toContain('span.rw-hl { background-color');
     expect(after).not.toMatch(/^\.rw-hl-block/m);
     expect(after).toContain(highlightCss());
     expect(after).toContain('figcaption {');
