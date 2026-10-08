@@ -17,7 +17,7 @@ export interface RmHighlight {
   text: string;
   /** Pen colour index (3 yellow, 4 green, 5 pink, 9 = see rgba). */
   color: number;
-  /** Exact colour on firmware that stores one (3.14+), as #rrggbb. */
+  /** Exact colour on firmware that stores one (3.14+), as #rrggbb. The Paper Pro writes black here, which we drop. */
   rgba: string | null;
   /** Bounding rectangles in page coordinates, in reading order. */
   rects: { x: number; y: number; w: number; h: number }[];
@@ -139,7 +139,7 @@ function readGlyph(r: Reader, end: number, id: string): RmHighlight {
     // Stored as little-endian BGRA.
     const packed = r.int(10);
     const hex = (v: number) => v.toString(16).padStart(2, '0');
-    rgba = `#${hex((packed >>> 16) & 0xff)}${hex((packed >>> 8) & 0xff)}${hex(packed & 0xff)}`;
+    if (packed & 0xffffff) rgba = `#${hex((packed >>> 16) & 0xff)}${hex((packed >>> 8) & 0xff)}${hex(packed & 0xff)}`;
   }
   return { id, text, color, rgba, rects };
 }
@@ -185,4 +185,22 @@ export function readRmHighlights(data: Uint8Array): RmHighlight[] {
     r.pos = end;
   }
   return [...byId.values()].filter((h): h is RmHighlight => h !== null);
+}
+
+const COLOR_NAMES: Record<number, string> = {
+  3: 'yellow',
+  4: 'green',
+  5: 'pink',
+  6: 'blue',
+  7: 'red',
+  8: 'gray',
+  10: 'green',
+  11: 'cyan',
+  12: 'magenta',
+  13: 'yellow',
+};
+
+/** A plain colour name for a highlight, for tags. Falls back to the hex value. */
+export function highlightColorName(h: Pick<RmHighlight, 'color' | 'rgba'>): string {
+  return COLOR_NAMES[h.color] ?? h.rgba ?? `color-${h.color}`;
 }

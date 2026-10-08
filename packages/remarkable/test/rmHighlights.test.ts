@@ -40,3 +40,11 @@ describe('readRmHighlights', () => {
     expect(() => readRmHighlights(new TextEncoder().encode('reMarkable .lines file, version=5          '))).toThrow(RmFormatError);
   });
 });
+
+describe('highlightColorName', () => {
+  it('names the Paper Pro highlighter colours', async () => {
+    const { highlightColorName } = await import('../src/rmHighlights.js');
+    expect([3, 4, 5].map((color) => highlightColorName({ color, rgba: null }))).toEqual(['yellow', 'green', 'pink']);
+    expect(highlightColorName({ color: 9, rgba: '#ffed75' })).toBe('#ffed75');
+  });
+});

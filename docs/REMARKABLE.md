@@ -27,6 +27,7 @@ So InkWise would be the first on-device Readwise sync for reMarkable, and it wou
 
 - Documents live in `/home/root/.local/share/remarkable/xochitl/` as `<uuid>.metadata`, `<uuid>.content`, `<uuid>.epub` and a `<uuid>/` folder of per-page `.rm` files.
 - EPUBs are rendered to a PDF internally. Highlights are stored per page, by position, in the v6 `.rm` scene files as `GlyphRange` items, and each one carries the **highlighted text and colour**. [rmscene](https://github.com/ricklupton/rmscene) parses them (3.6+ highlight format supported). Because the text is right there, we don't need the tablet to tell us what was selected the way Supernote's plugin API does.
+- What a Paper Pro actually writes (checked on Lance's pages, 2026-10-08): one piece per stroke, so a highlight dragged over three lines is three pieces, and one across a page turn is a piece on each page. Line breaks inside a piece are dropped ("Every’sJanuary"). Ligatures are garbled: "offsite" comes out as "o2site" and "filled" as "lled". The colour is in the colour index (3 yellow, 4 green, 5 pink); the exact-colour field is black. `packages/remarkable/src/assemble.ts` finds each piece in the source text with a tolerant match and joins same-colour pieces that touch, so Readwise gets the clean passage.
 - [highlight-reflow](https://github.com/rmitchellscott/rm-highlight-reflow) exists because reMarkable highlights drift when you change font or margins. Worth installing alongside InkWise.
 
 ## Proposed design
@@ -59,6 +60,6 @@ Use the reMarkable cloud API (like rmapi) from a server or scheduled job instead
 ## Next steps
 
 1. Lance: highlight a few passages (two colours, one across a page break) in any EPUB on the Paper Pro, then copy that document's folder from `/home/root/.local/share/remarkable/xochitl/` using reManager's file browser. Book text only, nothing private, since these files stay out of the public repo.
-2. ~~Prototype the `.rm` highlight reader~~ Done: `packages/remarkable/src/rmHighlights.ts`, tested on rmscene fixtures (firmware 3.1 and 3.14). Next, check it on the Paper Pro sample.
+2. ~~Prototype the `.rm` highlight reader~~ Done: `packages/remarkable/src/rmHighlights.ts`, tested on rmscene fixtures (firmware 3.1 and 3.14). Checked on Lance's Paper Pro pages: all three highlights (two-line, three-line over links, across a page turn) come back whole.
 3. Prototype the document writer and test one Reader article landing in an Inkwise folder.
 4. Wrap both in an AppLoad app and a Vellum package.
