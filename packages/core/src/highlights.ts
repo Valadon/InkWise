@@ -586,37 +586,79 @@ export function locateInText(selection: string, source: string): string | null {
  * offsets (`end` exclusive). Searches from `from` (a source offset).
  */
 export function findLoose(needle: string, source: string, from = 0): { start: number; end: number } | null {
-  const n = foldForMatch(needle).text;
+  let n = foldForMatch(needle).text;
   if (!n) return null;
-  const folded = foldForMatch(source);
-  let fromFolded = folded.map.findIndex((i) => i >= from);
+  // Marking a file looks up every highlight in the same text, so fold it once.
+  if (lastFold?.source !== source) lastFold = { source, folded: foldForMatch(source) };
+  const folded = lastFold.folded;
+  let fromFolded = from === 0 ? 0 : folded.map.findIndex((i) => i >= from);
   if (fromFolded === -1) return null;
-  const at = folded.text.indexOf(n, fromFolded);
+  let at = folded.text.indexOf(n, fromFolded);
+  if (at === -1) {
+    // A word the reader hyphenated at a line break ("compa- ny") is one word in the source.
+    const joined = foldForMatch(needle.replace(/([0-9A-Za-z\u00c0-\u024f])[-\u2010\u2011]\s+(?=[0-9A-Za-z\u00c0-\u024f])/g, '$1')).text;
+    if (joined !== n && (at = folded.text.indexOf(joined, fromFolded)) !== -1) n = joined;
+  }
   if (at === -1) return null;
   return { start: folded.map[at]!, end: folded.map[at + n.length - 1]! + 1 };
 }
 
-/** Lowercase, straighten, collapse whitespace; `map[i]` is the source index of folded char i. */
-function foldForMatch(s: string): { text: string; map: number[] } {
+interface Folded {
+  text: string;
+  map: number[];
+}
+
+let lastFold: { source: string; folded: Folded } | null = null;
+
+/** Characters the fold drops: soft hyphen, zero-width ones, and Inkwise's underline mark. */
+const FOLD_IGNORED = new Set(['\u00ad', '\u200b', '\u200c', '\u200d', '\u2060', '\ufeff', '\u0332']);
+/** What `straighten` does, one character at a time. */
+const FOLD_STRAIGHT: Record<string, string> = {
+  '\u2018': "'", '\u2019': "'", '\u201a': "'", '\u201b': "'", '\u2032': "'",
+  '\u201c': '"', '\u201d': '"', '\u201e': '"', '\u201f': '"', '\u2033': '"',
+  '\u2013': '-', '\u2014': '-', '\u2015': '-', '\u2212': '-', '\u2026': '...',
+};
+
+/**
+ * Lowercase, straighten, collapse whitespace; `map[i]` is the source index of
+ * folded char i. Written to be cheap per character: on the tablet's JS engine
+ * this loop is most of the time it takes to mark an article.
+ */
+function foldForMatch(s: string): Folded {
   let text = '';
   const map: number[] = [];
   let lastWasSpace = true;
   for (let i = 0; i < s.length; i++) {
-    let ch = s[i]!;
-    if (/[­​-‍⁠﻿]/.test(ch)) continue;
-    if (/\s| /.test(ch)) {
+    const ch = s[i]!;
+    const code = s.charCodeAt(i);
+    if (code < 128) {
+      if (code === 32 || (code >= 9 && code <= 13)) {
+        if (lastWasSpace) continue;
+        text += ' ';
+        map.push(i);
+        lastWasSpace = true;
+        continue;
+      }
+      // Space after a dash is dropped (below) on both sides: the reader turns a line break after "billion-" into one.
+      text += code >= 65 && code <= 90 ? String.fromCharCode(code + 32) : ch;
+      map.push(i);
+      lastWasSpace = ch === '-';
+      continue;
+    }
+    if (FOLD_IGNORED.has(ch)) continue;
+    if (code === 0xa0 || /\s/.test(ch)) {
       if (lastWasSpace) continue;
       text += ' ';
       map.push(i);
       lastWasSpace = true;
       continue;
     }
-    ch = straighten(ch).toLowerCase();
-    for (const c of ch) {
-      text += c;
+    const mapped = FOLD_STRAIGHT[ch] ?? ch.toLowerCase();
+    for (let j = 0; j < mapped.length; j++) {
+      text += mapped[j];
       map.push(i);
     }
-    lastWasSpace = false;
+    lastWasSpace = mapped === '-';
   }
   if (text.endsWith(' ')) {
     text = text.slice(0, -1);

@@ -100,8 +100,8 @@ export function SettingsScreen({ app, onClose }: { app: InkwiseApp; onClose: () 
           label="Mark highlights in articles"
           value={settings.showHighlights ? settings.highlightStyle : 'off'}
           options={[
-            { value: 'both', label: 'Bold and shaded paragraph' },
-            { value: 'bold', label: 'Bold words' },
+            { value: 'underline', label: 'Underlined words' },
+            { value: 'bold', label: 'Bold italic words' },
             { value: 'paragraph', label: 'Shaded paragraph' },
             { value: 'off', label: 'Off' },
           ]}

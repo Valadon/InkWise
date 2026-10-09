@@ -67,7 +67,7 @@ For each passage below, select it in an Inkwise EPUB and tap **Send highlight**.
 - [ ] **3.8** A sentence with an em dash.
 - [ ] **3.9** A selection that spans two paragraphs.
 - [ ] **3.10** A sentence containing italics or a link.
-- [ ] **3.11** Send highlight opens no screen: the words turn bold, their paragraph turns grey, and you're still reading. Handwriting already on the page stays where it was.
+- [ ] **3.11** Send highlight opens no screen: the words get underlined, and you're still reading. Select underlined words again and Send highlight offers to edit or delete that highlight. Handwriting already on the page stays where it was.
 - [ ] **3.11a** Select that passage again and tap Send highlight. A screen opens with the note field and **Delete highlight**. Add a note; it should show in Reader. Then delete it; the mark goes and Reader no longer has it.
 - [ ] **3.11b** Change the font size and margins. The mark should follow the text.
 - [ ] **3.11c** Highlight a passage in Reader on your phone, tap **Sync Reader**, and check the passage is marked on the Manta.
@@ -95,7 +95,7 @@ These are the open questions only a device can answer. If any of them goes wrong
 | Does Reader accept `DELETE /api/v3/delete/<id>/` for a highlight? | Delete highlight | An error message instead of "Highlight deleted." |
 | Is the handwriting file really `<name>.epub.mark` next to the EPUB? | Done, then sync | Handwriting missing after the article moves to Archive. |
 | Does `reloadFile()` show a rewritten EPUB straight away, and do handwritten marks survive it? | Marking highlights | No mark until the article is closed and reopened, or handwriting that moves. Marking can be turned off in settings. |
-| Which highlight styles does the DOC reader draw? | Marking highlights | Answered on a Manta with the plugin beta (2026-10-08): bold, grey text, and a background or border on a whole paragraph. No underlines, and no background behind words. The reader also skips a rule written for a bare class (`.rw-hl-block`) and draws only rules that name the element too (`p.rw-hl-block`), so Inkwise writes one rule per element. To check another device, run `node scripts/make-highlight-test-epub.mjs` and note which numbered lines look marked. |
+| Which highlight styles does the DOC reader draw? | Marking highlights | Answered on a Manta with the plugin beta (2026-10-08): bold, grey text, and a background or border on a whole paragraph. No underlines, and no background behind words. The reader also skips a rule written for a bare class (`.rw-hl-block`) and draws only rules that name the element too (`p.rw-hl-block`), so Inkwise writes one rule per element. A second test (2026-10-09) found that inline-block lays out as a block, so a box behind the words lands on its own line, while a combining low line (U+0332) draws a real underline that wraps with the text. That underline is the default. To check another device, run `node scripts/make-highlight-test-epub.mjs` and `node scripts/make-word-mark-test-epub.mjs` and note which numbered lines look marked. |
 | Does Reader's tag filter want the tag's display name or its lowercase key? | Sync with a tag set | A tag filter that finds nothing. Try the tag in lowercase. |
 
 ## If something breaks

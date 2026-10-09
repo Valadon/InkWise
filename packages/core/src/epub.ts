@@ -139,8 +139,8 @@ ${lines.join('\n')}
 `;
 }
 
-function withHighlights(xhtml: string, highlights?: string[]): string {
-  return highlights?.length ? markHighlights(xhtml, highlights).xhtml : xhtml;
+function withHighlights(xhtml: string, highlights?: string[], style?: HighlightStyle): string {
+  return highlights?.length ? markHighlights(xhtml, highlights, style).xhtml : xhtml;
 }
 
 export function buildEpub(doc: ReaderDocument, opts: BuildEpubOptions = {}): BuiltEpub {
@@ -237,7 +237,7 @@ ${manifestImages ? `${manifestImages}\n` : ''}  </manifest>
     'OEBPS/nav.xhtml': strToU8(nav),
     'OEBPS/toc.ncx': strToU8(ncx),
     'OEBPS/style.css': strToU8(EPUB_CSS + highlightCss(opts.highlightStyle)),
-    'OEBPS/article.xhtml': strToU8(withHighlights(renderArticleXhtml(doc, body, language), opts.highlights)),
+    'OEBPS/article.xhtml': strToU8(withHighlights(renderArticleXhtml(doc, body, language), opts.highlights, opts.highlightStyle)),
   };
   for (const img of usedImages) files[`OEBPS/${img.path}`] = [img.data, { level: 0 }];
 

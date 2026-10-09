@@ -15,6 +15,7 @@ import {
   highlightsKey,
   markEpub,
   DEFAULT_HIGHLIGHT_STYLE,
+  HIGHLIGHT_STYLES,
   type FetchLike,
   type HighlightStyle,
   type ManifestStore,
@@ -158,7 +159,12 @@ export class InkwiseApp {
     const path = joinPath(await this.privateDir(), 'settings.json');
     try {
       const text = (await this.fs.exists(path)) ? await this.fs.readText(path) : await this.restore('settings.json', path);
-      if (text !== null) return { ...DEFAULT_SETTINGS, ...JSON.parse(text) };
+      if (text !== null) {
+        const loaded: Settings = { ...DEFAULT_SETTINGS, ...JSON.parse(text) };
+        // Styles from older builds ('both') fall back to the default.
+        if (!HIGHLIGHT_STYLES.includes(loaded.highlightStyle)) loaded.highlightStyle = DEFAULT_HIGHLIGHT_STYLE;
+        return loaded;
+      }
     } catch {
       // Corrupt settings fall back to defaults.
     }
@@ -170,7 +176,7 @@ export class InkwiseApp {
     next.maxArticles = Math.max(1, Math.min(200, Math.round(Number(next.maxArticles) || DEFAULT_SETTINGS.maxArticles)));
     next.folderName = sanitizeFolder(next.folderName);
     next.tag = next.tag.trim();
-    if (!['both', 'bold', 'paragraph'].includes(next.highlightStyle)) next.highlightStyle = DEFAULT_HIGHLIGHT_STYLE;
+    if (!HIGHLIGHT_STYLES.includes(next.highlightStyle)) next.highlightStyle = DEFAULT_HIGHLIGHT_STYLE;
     const text = JSON.stringify(next, null, 2);
     await this.fs.writeText(joinPath(await this.privateDir(), 'settings.json'), text);
     await this.backUp('settings.json', text);

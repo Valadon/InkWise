@@ -6,13 +6,16 @@ import { addDocHighlight, highlightsKey, updateManifest, withManifestLock, type 
 import type { HighlightStyle } from './markStyle.js';
 import type { OutputAdapter } from './output.js';
 import { NetworkError, ReadwiseClient, ReadwiseError } from './readwise.js';
-import type { FetchLike, ReaderDocument } from './types.js';
+import { READABLE_CATEGORIES, type FetchLike, type ReaderDocument } from './types.js';
 
 export interface SyncOptions {
   /** Reader location to pull from. Default `later`. */
   location?: string;
-  /** Reader category. Default `article`. Pass `null` for every category. */
-  category?: string | null;
+  /**
+   * Reader categories to sync: one, a list, or `null` for every category.
+   * Default READABLE_CATEGORIES (articles, newsletters, feed items, tweets).
+   */
+  category?: string | readonly string[] | null;
   /** Only documents with all of these tags (max 5). */
   tags?: string[];
   limit?: number;
@@ -92,13 +95,29 @@ export async function syncReader(deps: SyncDeps, opts: SyncOptions = {}): Promis
   };
 
   say('Fetching your Reader queue…');
+  const wanted: readonly string[] | null = opts.category === undefined ? READABLE_CATEGORIES : opts.category === null ? null : [opts.category].flat();
+  /** Documents left out because of their category, counted so the user knows they exist. */
+  const leftOut = new Map<string, number>();
   const docs = await deps.client.listDocuments({
     location: opts.location ?? 'later',
-    category: opts.category === null ? undefined : opts.category ?? 'article',
+    // Reader filters one category itself; for several, ask for all and filter here.
+    category: wanted?.length === 1 ? wanted[0] : undefined,
+    accept:
+      wanted && wanted.length > 1
+        ? (d) => {
+            if (wanted.includes(d.category)) return true;
+            leftOut.set(d.category, (leftOut.get(d.category) ?? 0) + 1);
+            return false;
+          }
+        : undefined,
     tags: opts.tags,
     withHtmlContent: true,
     limit: opts.limit,
   });
+  if (leftOut.size) {
+    const n = [...leftOut.values()].reduce((a, b) => a + b, 0);
+    warnings.push(`Left out ${n} Reader ${n === 1 ? 'item' : 'items'} Inkwise can't turn into an EPUB (${[...leftOut.keys()].join(', ')}).`);
+  }
   say(`Found ${docs.length} ${docs.length === 1 ? 'article' : 'articles'}.`);
 
   const showHighlights = opts.showHighlights ?? true;

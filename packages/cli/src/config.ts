@@ -1,6 +1,7 @@
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { READABLE_CATEGORIES } from '@inkwise/core';
 import { parse } from 'smol-toml';
 
 export type Target = 'supernote-cloud' | 'dropbox' | 'gdrive' | 'folder';
@@ -9,7 +10,8 @@ export const TARGETS: Target[] = ['supernote-cloud', 'dropbox', 'gdrive', 'folde
 export interface Config {
   target: Target;
   location: string;
-  category: string | null;
+  /** One Reader category, a list, or null for all of them. */
+  category: string | string[] | null;
   tags: string[];
   limit?: number;
   images: boolean;
@@ -33,7 +35,7 @@ export function configPath(): string {
 export const DEFAULT_CONFIG: Config = {
   target: 'supernote-cloud',
   location: 'later',
-  category: 'article',
+  category: [...READABLE_CATEGORIES],
   tags: [],
   images: true,
   removeMissing: false,
@@ -63,7 +65,7 @@ export async function loadConfig(path = configPath()): Promise<Config> {
   const c: Config = structuredClone(DEFAULT_CONFIG);
   if (raw.target) c.target = assertTarget(raw.target);
   if (raw.location) c.location = String(raw.location);
-  if (raw.category !== undefined) c.category = raw.category === 'all' ? null : String(raw.category);
+  if (raw.category !== undefined) c.category = parseCategory(raw.category);
   if (Array.isArray(raw.tags)) c.tags = raw.tags.map(String);
   if (raw.limit) c.limit = Number(raw.limit);
   if (raw.images !== undefined) c.images = !!raw.images;
@@ -85,6 +87,13 @@ export async function loadConfig(path = configPath()): Promise<Config> {
   return c;
 }
 
+/** "all" means every category; a comma list or TOML array means several. */
+export function parseCategory(raw: unknown): string | string[] | null {
+  const list = (Array.isArray(raw) ? raw : String(raw).split(',')).map((c) => String(c).trim()).filter(Boolean);
+  if (list.includes('all')) return null;
+  return list.length === 1 ? list[0]! : list;
+}
+
 export function assertTarget(t: string): Target {
   if (!TARGETS.includes(t as Target)) throw new Error(`Unknown target "${t}". Use one of: ${TARGETS.join(', ')}.`);
   return t as Target;
@@ -104,7 +113,7 @@ export const SAMPLE_CONFIG = `# Inkwise CLI config. Secrets never go here: use e
 
 target = "supernote-cloud"   # supernote-cloud | dropbox | gdrive | folder
 location = "later"           # later | shortlist | new | archive
-category = "article"         # or "all"
+category = ["article", "email", "rss", "tweet"]   # or "all"
 tags = []                    # only documents with all of these tags (max 5)
 images = true
 remove_missing = false       # tidy up articles that left the queue
