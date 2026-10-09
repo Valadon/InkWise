@@ -1,20 +1,13 @@
 import { ReadwiseClient, type ListOptions, type ReaderDocument } from '@inkwise/core';
 
 /**
- * Reader categories that become books on the tablet: everything Reader keeps
- * as a web page. Reader files a saved X or Twitter post as `tweet` and a
- * newsletter as `email`, so pulling `article` alone missed them. PDFs, EPUBs
- * and videos stay in Reader for now.
- */
-export const TABLET_CATEGORIES: ReadonlySet<string> = new Set(['article', 'email', 'rss', 'tweet']);
-
-/**
- * The Readwise client the tablet syncs with. Core asks for one category at a
- * time; when the sync asks for all of them, this lists the whole location once
- * and keeps the web pages, counting what it leaves out so the summary can say.
+ * The Readwise client the tablet syncs with. Core picks which Reader
+ * categories become books (articles, newsletters, feed items, X posts); this
+ * counts what it leaves out so the summary can say, and lists books already
+ * opened on the tablet as unchanged.
  */
 export class TabletReadwiseClient extends ReadwiseClient {
-  /** What the last listing left out, by Reader category (`empty` for pages with no text). */
+  /** What the last listing left out, by Reader category. */
   skipped: Record<string, number> = {};
   /**
    * Books already opened on the tablet, by Reader ID, with the `updated_at`
@@ -25,23 +18,22 @@ export class TabletReadwiseClient extends ReadwiseClient {
   readonly opened = new Map<string, string>();
 
   override async listDocuments(opts: ListOptions = {}): Promise<ReaderDocument[]> {
-    if (opts.category) return super.listDocuments(opts);
-    // The limit counts what's kept, so it can't cut the listing short.
-    const docs = await super.listDocuments({ ...opts, limit: undefined });
     this.skipped = {};
-    const out: ReaderDocument[] = [];
-    for (const doc of docs) {
-      const blank = opts.withHtmlContent && !(doc.html_content || doc.content || '').trim();
-      const left = !TABLET_CATEGORIES.has(doc.category) ? doc.category : blank ? 'empty' : null;
-      if (left) {
-        this.skipped[left] = (this.skipped[left] ?? 0) + 1;
-        continue;
-      }
+    const accept = opts.accept;
+    const docs = await super.listDocuments({
+      ...opts,
+      accept:
+        accept &&
+        ((doc) => {
+          if (accept(doc)) return true;
+          this.skipped[doc.category] = (this.skipped[doc.category] ?? 0) + 1;
+          return false;
+        }),
+    });
+    return docs.map((doc) => {
       const builtFrom = this.opened.get(doc.id);
-      out.push(builtFrom ? { ...doc, updated_at: builtFrom } : doc);
-      if (opts.limit && out.length >= opts.limit) break;
-    }
-    return out;
+      return builtFrom ? { ...doc, updated_at: builtFrom } : doc;
+    });
   }
 }
 
@@ -49,7 +41,6 @@ const NOUNS: Record<string, [string, string]> = {
   pdf: ['PDF', 'PDFs'],
   epub: ['EPUB', 'EPUBs'],
   video: ['video', 'videos'],
-  empty: ['page with no text', 'pages with no text'],
 };
 
 /** "Skipped 1 PDF and 2 videos (InkWise only brings over web pages for now)." Empty when nothing was skipped. */

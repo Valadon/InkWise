@@ -16,6 +16,8 @@ cp app/backend/entry "$OUT/backend/entry"
 chmod 755 "$OUT/backend/entry"
 # Uncompressed: the tablet's Qt may not have zstd.
 (cd app && "$RCC" --binary --no-compress -o "../$OUT/resources.rcc" application.qrc)
+# The bundle takes core from its build output, so build it first.
+npx tsc -b ../core
 bun build --compile --minify --target="$TARGET" --define "process.env.INKWISE_VERSION=\"$VERSION\"" src/main.ts --outfile "$OUT/backend/inkwise-rm"
 tar --owner=0 --group=0 -czf "dist-app/inkwise-app-$VERSION.tar.gz" -C dist-app inkwise
 echo "Built dist-app/inkwise-app-$VERSION.tar.gz"

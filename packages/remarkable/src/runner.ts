@@ -37,6 +37,8 @@ export interface LastSync {
   highlightsSent: number;
   /** New articles are on disk but the reading app won't show them until it restarts. */
   waitingForRestart: boolean;
+  /** The sync's warnings, so the next one can tell which are new. */
+  warnings?: string[];
 }
 
 export class SyncBusy extends Error {
@@ -228,6 +230,7 @@ export async function runSync(opts: RunOptions): Promise<RunResult> {
 
     let added = 0;
     let highlightsSent = 0;
+    let warnings: string[] = [];
     let summary = '';
     let error: unknown;
     try {
@@ -250,10 +253,13 @@ export async function runSync(opts: RunOptions): Promise<RunResult> {
       }
       const result = await syncReader(
         { client, output, manifest, fetchImages: imageFetch, onProgress: (m) => say(m), now },
-        // Every category: the client keeps the ones that make a book.
-        { location: opts.location ?? settings.location, category: null, limit: opts.limit, dryRun: opts.dryRun, showHighlights: false, includeImages: !!imageFetch },
+        { location: opts.location ?? settings.location, limit: opts.limit, dryRun: opts.dryRun, showHighlights: false, includeImages: !!imageFetch },
       );
-      for (const w of result.warnings) say(`warning: ${w}`, true);
+      warnings = result.warnings;
+      // A warning the last sync already logged (a PDF still in Later, a picture
+      // that can't be shown) isn't logged again every half hour.
+      const seen = new Set((await loadLastSync(opts.home, opts.mock))?.warnings ?? []);
+      for (const w of warnings) say(`warning: ${w}`, !seen.has(w));
       // Reader bumps an article whenever it gets a highlight, so core asks to rebuild it;
       // books already opened on the tablet are left as they are (see XochitlOutput.put).
       const kept = result.items.filter((i) => i.action === 'updated' && output.kept.has(i.filename)).length;
@@ -281,6 +287,7 @@ export async function runSync(opts: RunOptions): Promise<RunResult> {
       added,
       highlightsSent,
       waitingForRestart: output.needsRestart,
+      warnings,
       changed: output.changed,
       librarian: !!libraryControl,
       error,
