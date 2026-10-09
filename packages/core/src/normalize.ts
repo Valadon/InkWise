@@ -9,6 +9,8 @@
 
 const ZERO_WIDTH = /[​-‍⁠﻿]/g;
 const SOFT_HYPHEN = /­/g;
+/** Inkwise underlines highlights with U+0332 (markStyle.ts), so a selection over one carries them. */
+const UNDERLINE_RE = /\u0332/g;
 const NBSP_LIKE = /[   ]/g;
 const WHITESPACE_RUN = /\s+/g;
 
@@ -28,6 +30,7 @@ export function normalizeSelection(text: string): string {
   return text
     .replace(ZERO_WIDTH, '')
     .replace(SOFT_HYPHEN, '')
+    .replace(UNDERLINE_RE, '')
     .replace(LIGATURE_RE, (ch) => LIGATURES[ch] ?? ch)
     .replace(NBSP_LIKE, ' ')
     .replace(WHITESPACE_RUN, ' ')
@@ -64,6 +67,8 @@ export function highlightVariants(raw: string): string[] {
   // Em dashes are often rendered without surrounding spaces; try both ways.
   out.push(base.replace(/\s*—\s*/g, '—'));
   out.push(straighten(base).replace(/\s*-\s*/g, '-'));
+  // The reader breaks lines after a hyphen and the selection puts a space there: "billion- token".
+  out.push(base.replace(/([0-9A-Za-z\u00c0-\u024f])[-\u2010\u2011]\s+(?=[0-9A-Za-z\u00c0-\u024f])/g, '$1-'));
   return unique(out.filter((s) => s.length > 0));
 }
 

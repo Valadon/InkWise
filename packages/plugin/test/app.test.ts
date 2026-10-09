@@ -236,9 +236,61 @@ describe('Send highlight', () => {
     expect(r.shading).toBe(SHADED);
     expect(host.reloads).toBe(1);
     const article = strFromU8(unzipSync(await fs.readBytes(path))['OEBPS/article.xhtml']!);
-    expect(article).toContain('<span class="rw-hl">None of this is new.</span>');
+    expect(article).toContain(`<span class="rw-hl">${[...'None of this is new.'].map((c) => `\u0332${c}`).join('')}</span>`);
     // The next sync sees the file already shows it and leaves it alone.
     expect(await app.sync(() => {})).toBe('Synced 0 new, 0 updated.');
+  });
+
+  it('writes over the file in place when the device refuses the rename, and logs each step', async () => {
+    const path = `${LIBRARY}/${epubFilename(longform)}`;
+    host.filePath = path;
+    host.selection = 'None of this is new.';
+    fs.denyMoveOnto.add(path);
+    const r = await app.sendSelection();
+    expect(r.shading).toBe(SHADED);
+    expect(strFromU8(unzipSync(fs.files.get(path)!)['OEBPS/article.xhtml']!).replace(/\u0332/g, '')).toContain(
+      '<span class="rw-hl">None of this is new.</span>',
+    );
+    expect([...fs.files.keys()].some((k) => k.endsWith('.part'))).toBe(false);
+    const log = await fs.readText(`${STORAGE_ROOT}/MyStyle/Inkwise/inkwise-log.txt`);
+    expect(log).toContain('send: sent');
+    expect(log).toMatch(/mark: 1 of 1 found \(underline\)/);
+    expect(log).toContain('writing in place');
+    expect(log).toContain('(written in place)');
+    expect(log).not.toContain('device-token');
+  });
+
+  it('Mark highlights now marks every article with highlights and says so', async () => {
+    host.selection = 'None of this is new.';
+    await app.sendSelection();
+    // Pretend the file never got marked.
+    const plain = (await import('@inkwise/core')).buildEpub(longform, { modified: new Date('2026-10-08T00:00:00Z') });
+    fs.files.set(`${LIBRARY}/${epubFilename(longform)}`, plain.bytes);
+    const r = await app.markAll();
+    expect(r).toEqual({ ok: true, message: 'Marked highlights in 1 of 1 article.' });
+    expect(strFromU8(unzipSync(fs.files.get(`${LIBRARY}/${epubFilename(longform)}`)!)['OEBPS/article.xhtml']!)).toContain('rw-hl');
+  });
+
+  it('marks in the style picked in settings, and redoes old articles on sync', async () => {
+    const path = `${LIBRARY}/${epubFilename(longform)}`;
+    host.filePath = path;
+    host.selection = 'None of this is new.';
+    await app.saveSettings({ highlightStyle: 'paragraph' });
+    await app.sendSelection();
+    const css = () => strFromU8(unzipSync(fs.files.get(path)!)['OEBPS/style.css']!);
+    expect(css()).toContain('p.rw-hl-block { background-color: #d2d2d2; }');
+    expect(css()).not.toContain('font-weight: bold; }\n.rw-hl-block');
+    await app.saveSettings({ highlightStyle: 'bold' });
+    expect(await app.sync(() => {})).toBe('Synced 0 new, 1 updated.');
+    expect(css()).toContain('span.rw-hl { font-weight: bold; font-style: italic; }');
+    expect(css()).not.toContain('.rw-hl-block {');
+  });
+
+  it('reads a style an older build saved as the default underline', async () => {
+    await app.saveSettings({ highlightStyle: 'paragraph' });
+    const path = [...fs.files.keys()].find((k) => k.endsWith('/settings.json') && !k.includes('/backup/'))!;
+    await fs.writeText(path, (await fs.readText(path)).replace('"paragraph"', '"both"'));
+    expect((await app.settings()).highlightStyle).toBe('underline');
   });
 
   it('quick send stays silent when the highlight is sent and shaded', async () => {
@@ -250,8 +302,8 @@ describe('Send highlight', () => {
     expect(r?.status).toBe('sent');
     expect(ui).toMatchObject({ shown: 0, closed: 1 });
 
-    // Selecting it again opens the screen to edit or delete it.
-    host.selection = 'None of this is new';
+    // Selecting it again (now underlined on the page) opens the screen to edit or delete it.
+    host.selection = [...'None of this is new'].map((c) => `\u0332${c}`).join('');
     const again = await quickSend(app, ui, state);
     expect(again?.status).toBe('duplicate');
     expect(again?.existing?.text).toBe('None of this is new.');

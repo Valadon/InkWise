@@ -21,6 +21,20 @@ const ERRORS: Record<number, string> = {
   1503: 'Inkwise needs permission to read files.',
 };
 
+/**
+ * Some host calls never answer in the wrong context (asking for the open file
+ * from the settings page, for one), so don't wait on them forever.
+ */
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`The Supernote didn't answer (${what}).`)), ms);
+  });
+  return Promise.race([p, late]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
 export const supernoteHost: Host = {
   async pluginDir() {
     const dir = await PluginManager.getPluginDirPath();
@@ -44,12 +58,12 @@ export const supernoteHost: Host = {
     }
   },
   async reloadFile() {
-    const r = asResponse<unknown>(await PluginCommAPI.reloadFile());
+    const r = asResponse<unknown>(await withTimeout(PluginCommAPI.reloadFile(), 10000, 'reload file'));
     if (!r.success) throw new Error(r.error?.message ?? 'The Supernote would not reload the file.');
   },
   async currentFilePath() {
     try {
-      const r = asResponse<string>(await PluginCommAPI.getCurrentFilePath());
+      const r = asResponse<string>(await withTimeout(PluginCommAPI.getCurrentFilePath(), 3000, 'current file'));
       return r.success && r.result ? r.result : null;
     } catch {
       return null;

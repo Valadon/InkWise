@@ -246,4 +246,34 @@ describe('locateInText', () => {
     expect(locateInText('absent', src)).toBeNull();
     expect(locateInText('', src)).toBeNull();
   });
+
+  it('copes with the reader breaking a line after a hyphen', () => {
+    const src = '“There’s no billion-dollar—sorry, billion-token—move I can make,” he says.';
+    // Lance's Manta, 2026-10-09: the line broke after "billion-" and the selection put a space there.
+    expect(locateInText('“There’s no billion-dollar—sorry, billion- token—move I can make,”', src)).toBe(
+      '“There’s no billion-dollar—sorry, billion-token—move I can make,”',
+    );
+    expect(locateInText('a compa- ny that', 'It is a company that works.')).toBe('a company that');
+  });
+
+  it('ignores the underline marks Inkwise adds to highlighted words', () => {
+    const underlined = [...'billion-token'].map((c) => `\u0332${c}`).join('');
+    expect(locateInText(`sorry, ${underlined}—move`, 'sorry, billion-token—move I')).toBe('sorry, billion-token—move');
+  });
+});
+
+describe('sendHighlight across a line break', () => {
+  it('sends the source text when the selection has a space after a hyphen', async () => {
+    const { fake, client, manifest } = await setup();
+    const doc = { ...fixture('longform'), id: '01hyphenatedlinebreak0000', html_content: '<p>“There’s no billion-dollar—sorry, billion-token—move I can make,” he says.</p>' };
+    fake.documents.push(doc);
+    const r = await sendHighlight({
+      client,
+      manifest,
+      filePath: `${DEVICE_DIR}/${epubFilename(doc)}`,
+      text: '“There’s no billion-dollar—sorry, billion-\ntoken—move I can make,”',
+    });
+    expect(r.status).toBe('sent');
+    expect(fake.highlights.at(-1)?.content).toBe('“There’s no billion-dollar—sorry, billion-token—move I can make,”');
+  });
 });

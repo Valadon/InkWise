@@ -46,6 +46,8 @@ export interface ListOptions {
   pageSize?: number;
   /** Stop after this many top-level documents. */
   limit?: number;
+  /** Keep only documents this returns true for; `limit` counts kept documents only. */
+  accept?: (doc: ReaderDocument) => boolean;
 }
 
 export interface CreateHighlightInput {
@@ -128,6 +130,7 @@ export class ReadwiseClient {
       const page = (await res.json()) as ListResponse;
       for (const doc of page.results ?? []) {
         if (doc.parent_id) continue;
+        if (opts.accept && !opts.accept(doc)) continue;
         out.push(doc);
         if (opts.limit && out.length >= opts.limit) return out;
       }

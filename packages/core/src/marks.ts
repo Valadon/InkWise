@@ -1,18 +1,32 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { findLoose } from './highlights.js';
-import { HIGHLIGHT_CLASS, HIGHLIGHT_CSS } from './markStyle.js';
+import {
+  DEFAULT_HIGHLIGHT_STYLE,
+  HIGHLIGHT_BLOCK_CLASS,
+  HIGHLIGHT_CLASS,
+  MARKABLE_BLOCKS as BLOCK_TAGS,
+  UNDERLINE_MARK,
+  highlightCss,
+  type HighlightStyle,
+} from './markStyle.js';
 
 /**
  * Shows Readwise highlights inside an Inkwise EPUB. The Supernote plugin SDK
- * can't add a highlight to a DOC page, so Inkwise wraps the passage in a styled
- * span in the EPUB itself. The text is untouched (no characters added, moved or
- * removed), so pages lay out the same and handwritten marks stay in place.
+ * can't add a highlight to a DOC page, so Inkwise wraps the passage in a span
+ * in the EPUB itself and tags the paragraphs it touches. The underline style
+ * also puts a combining low line before each character in the span; nothing
+ * else in the text changes. markStyle.ts says why.
  */
 
 /** An Inkwise highlight rule from any version, so an old one can be replaced. */
-const HIGHLIGHT_RULE = new RegExp(`^span\\.${HIGHLIGHT_CLASS}\\s*\\{[^}]*\\}[ \\t]*\\n?`, 'gm');
+const HIGHLIGHT_RULE = new RegExp(`^(?:span\\.${HIGHLIGHT_CLASS}|[a-z0-9]*\\.${HIGHLIGHT_BLOCK_CLASS})\\s*\\{[^}]*\\}[ \\t]*\\n?`, 'gm');
 
 const OPEN_MARK = `<span class="${HIGHLIGHT_CLASS}">`;
+const TEXT_FILE = /\.(x?html?|css|opf|ncx|xml|txt|svg)$/i;
+const BLOCK_ATTR = ` class="${HIGHLIGHT_BLOCK_CLASS}"`;
+const UNDERLINE_RE = new RegExp(UNDERLINE_MARK, 'g');
+
+const MARKABLE_BLOCKS = new Set(BLOCK_TAGS);
 
 /** Tags after which text on either side reads as separate words. */
 const BREAKING_TAGS = new Set([
@@ -48,8 +62,9 @@ type Token = TextToken | { kind: 'tag'; raw: string };
  * Wrap each highlight's passage in `<span class="rw-hl">`. Existing Inkwise
  * marks are removed first, so calling this again with the full list is safe.
  */
-export function markHighlights(xhtml: string, highlights: string[]): MarkResult {
+export function markHighlights(xhtml: string, highlights: string[], style: HighlightStyle = DEFAULT_HIGHLIGHT_STYLE): MarkResult {
   const tokens = tokenize(stripMarks(xhtml));
+  const blockOf = innermostBlocks(tokens);
 
   // Join eligible text into one string, with a space where a block boundary
   // separated two runs. `owner[i]` says which token and character produced it.
@@ -76,6 +91,8 @@ export function markHighlights(xhtml: string, highlights: string[]): MarkResult 
 
   /** Per token: plain-character ranges to wrap. */
   const wraps = new Map<number, [number, number][]>();
+  /** Opening tags of the blocks to tag. */
+  const blocks = new Set<number>();
   let marked = 0;
   const missing: string[] = [];
   for (const h of dedupe(highlights)) {
@@ -88,6 +105,8 @@ export function markHighlights(xhtml: string, highlights: string[]): MarkResult 
     for (let i = range.start; i < range.end; i++) {
       const o = owner[i];
       if (!o) continue;
+      const block = blockOf.get(o.token);
+      if (block !== undefined && !/\s/.test(plain[i]!)) blocks.add(block);
       const list = wraps.get(o.token) ?? [];
       const last = list[list.length - 1];
       if (last && last[1] === o.index) last[1] = o.index + 1;
@@ -97,14 +116,45 @@ export function markHighlights(xhtml: string, highlights: string[]): MarkResult 
   }
 
   const out = tokens.map((t, ti) => {
+    if (t.kind === 'tag') return blocks.has(ti) ? addBlockClass(t.raw) : t.raw;
     const list = wraps.get(ti);
-    if (t.kind === 'tag' || !list) return t.raw;
-    return wrapToken(t, mergeRanges(list));
+    return list ? wrapToken(t, mergeRanges(list), style === 'underline') : t.raw;
   });
   return { xhtml: out.join(''), marked, missing };
 }
 
-function wrapToken(t: TextToken, ranges: [number, number][]): string {
+/** For each text token, the opening tag of the innermost markable block around it. */
+function innermostBlocks(tokens: Token[]): Map<number, number> {
+  const out = new Map<number, number>();
+  const stack: { name: string; token: number }[] = [];
+  tokens.forEach((t, ti) => {
+    if (t.kind === 'text') {
+      const top = stack[stack.length - 1];
+      if (top) out.set(ti, top.token);
+      return;
+    }
+    const name = tagName(t.raw);
+    if (!name || !MARKABLE_BLOCKS.has(name) || t.raw.endsWith('/>')) return;
+    if (!t.raw.startsWith('</')) {
+      stack.push({ name, token: ti });
+      return;
+    }
+    const at = stack.map((b) => b.name).lastIndexOf(name);
+    if (at >= 0) stack.length = at;
+  });
+  return out;
+}
+
+/** Add the block class to an opening tag, merging with a class it already has. */
+function addBlockClass(tag: string): string {
+  const cls = /\sclass\s*=\s*(["'])(.*?)\1/.exec(tag);
+  if (!cls) return tag.replace(/^<[a-zA-Z][a-zA-Z0-9]*/, (open) => open + BLOCK_ATTR);
+  const names = cls[2]!.split(/\s+/).filter(Boolean);
+  if (names.includes(HIGHLIGHT_BLOCK_CLASS)) return tag;
+  return tag.replace(cls[0], ` class=${cls[1]}${[...names, HIGHLIGHT_BLOCK_CLASS].join(' ')}${cls[1]}`);
+}
+
+function wrapToken(t: TextToken, ranges: [number, number][], underline: boolean): string {
   let s = '';
   let pos = 0;
   for (const [a, b] of ranges) {
@@ -116,10 +166,31 @@ function wrapToken(t: TextToken, ranges: [number, number][]): string {
     if (start === end) continue;
     const rawA = t.rawStart[start]!;
     const rawB = t.rawEnd[end - 1]!;
-    s += t.raw.slice(pos, rawA) + OPEN_MARK + t.raw.slice(rawA, rawB) + '</span>';
+    s += t.raw.slice(pos, rawA) + OPEN_MARK + (underline ? underlined(t, start, end) : t.raw.slice(rawA, rawB)) + '</span>';
     pos = rawB;
   }
   return s + t.raw.slice(pos);
+}
+
+/**
+ * The raw text of plain[start, end) with a combining low line before each
+ * character. The Manta draws the mark under the character that follows it,
+ * not the one before (style test 2026-10-09), so it goes in front.
+ */
+function underlined(t: TextToken, start: number, end: number): string {
+  let s = '';
+  for (let i = start; i < end; i++) {
+    const raw = t.raw.slice(t.rawStart[i]!, t.rawEnd[i]!);
+    // Both halves of a character decoded from one entity share its raw text.
+    if (i > start && t.rawStart[i] === t.rawStart[i - 1]) continue;
+    const c = t.plain.charCodeAt(i);
+    const space = /\s/.test(t.plain[i]!);
+    // One mark per run of spaces (marks between spaces would stop them collapsing), and
+    // none before a low surrogate or a combining accent, which would split the character.
+    const skip = (space && i > start && /\s/.test(t.plain[i - 1]!)) || (c >= 0xdc00 && c <= 0xdfff) || (c >= 0x300 && c <= 0x36f);
+    s += (skip ? '' : UNDERLINE_MARK) + raw;
+  }
+  return s;
 }
 
 function mergeRanges(list: [number, number][]): [number, number][] {
@@ -137,15 +208,32 @@ function dedupe(list: string[]): string[] {
   return [...new Set(list.map((h) => h.trim()).filter(Boolean))];
 }
 
-/** Remove Inkwise's own highlight spans, keeping their text. */
+/** Remove Inkwise's own highlight spans, underline marks and paragraph tags, keeping the text. */
 export function stripMarks(xhtml: string): string {
+  if (xhtml.includes(HIGHLIGHT_BLOCK_CLASS)) {
+    xhtml = xhtml.replace(/<[a-zA-Z][^>]*>/g, (tag) =>
+      !tag.includes(HIGHLIGHT_BLOCK_CLASS)
+        ? tag
+        : tag
+            .replace(BLOCK_ATTR, '')
+            .replace(new RegExp(`(\\sclass\\s*=\\s*(["'])[^"']*?)\\s+${HIGHLIGHT_BLOCK_CLASS}(?=[\\s"'])`), '$1'),
+    );
+  }
   if (!xhtml.includes(OPEN_MARK)) return xhtml;
   const stack: boolean[] = [];
-  return xhtml.replace(/<\/?span\b[^>]*>/g, (tag) => {
-    if (tag.startsWith('</')) return stack.pop() ? '' : tag;
-    const ours = tag === OPEN_MARK;
+  let inside = 0;
+  return xhtml.replace(/<[^>]*>|[^<]+/g, (part) => {
+    if (part[0] !== '<') return inside ? part.replace(UNDERLINE_RE, '') : part;
+    if (!/^<\/?span\b/.test(part)) return part;
+    if (part.startsWith('</')) {
+      if (!stack.pop()) return part;
+      inside--;
+      return '';
+    }
+    const ours = part === OPEN_MARK;
     stack.push(ours);
-    return ours ? '' : tag;
+    if (ours) inside++;
+    return ours ? '' : part;
   });
 }
 
@@ -225,7 +313,11 @@ function splitUnits(s: string): string[] {
  * Apply highlights to every content document in an EPUB and make sure its
  * stylesheet can show them. Returns null when the bytes aren't a readable EPUB.
  */
-export function markEpub(bytes: Uint8Array, highlights: string[]): { bytes: Uint8Array; marked: number; missing: string[] } | null {
+export function markEpub(
+  bytes: Uint8Array,
+  highlights: string[],
+  style?: HighlightStyle,
+): { bytes: Uint8Array; marked: number; missing: string[] } | null {
   let files: Record<string, Uint8Array>;
   try {
     files = unzipSync(bytes);
@@ -240,21 +332,24 @@ export function markEpub(bytes: Uint8Array, highlights: string[]): { bytes: Uint
   let missing = dedupe(highlights);
   for (const name of content) {
     // Each highlight is looked for in every document, and counts as found once.
-    const r = markHighlights(strFromU8(files[name]!), highlights);
+    const r = markHighlights(strFromU8(files[name]!), highlights, style);
     files[name] = strToU8(r.xhtml);
     missing = missing.filter((h) => r.missing.includes(h));
   }
   marked = dedupe(highlights).length - missing.length;
 
+  // Swap in the current rules for whatever an older build (or style) wrote.
   for (const name of Object.keys(files).filter((n) => n.endsWith('.css'))) {
-    const css = strFromU8(files[name]!);
-    if (css.includes(HIGHLIGHT_CSS)) continue;
-    const rest = css.replace(HIGHLIGHT_RULE, '');
-    files[name] = strToU8(rest + (rest === '' || rest.endsWith('\n') ? '' : '\n') + HIGHLIGHT_CSS);
+    const rest = strFromU8(files[name]!).replace(HIGHLIGHT_RULE, '');
+    files[name] = strToU8(rest + (rest === '' || rest.endsWith('\n') ? '' : '\n') + highlightCss(style));
   }
 
-  // The mimetype entry must come first and be stored uncompressed.
+  // The mimetype entry must come first and be stored uncompressed. Images are
+  // already compressed, and deflating them again is most of the work on a
+  // tablet's CPU, so they're stored as they are.
   const ordered: Record<string, any> = { mimetype: [files.mimetype, { level: 0 }] };
-  for (const [name, data] of Object.entries(files)) if (name !== 'mimetype') ordered[name] = data;
-  return { bytes: zipSync(ordered, { level: 9 }), marked, missing };
+  for (const [name, data] of Object.entries(files)) {
+    if (name !== 'mimetype') ordered[name] = TEXT_FILE.test(name) ? data : [data, { level: 0 }];
+  }
+  return { bytes: zipSync(ordered, { level: 6 }), marked, missing };
 }

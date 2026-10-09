@@ -37,6 +37,9 @@ export type ReaderCategory =
   | 'tweet'
   | 'video';
 
+/** Reader categories Inkwise can turn into a readable EPUB (they come with HTML content). */
+export const READABLE_CATEGORIES: readonly ReaderCategory[] = ['article', 'email', 'rss', 'tweet'];
+
 /** A document as returned by Reader's `GET /api/v3/list/`. Only fields Inkwise reads are typed strictly. */
 export interface ReaderDocument {
   id: string;

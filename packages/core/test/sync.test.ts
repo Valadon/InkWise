@@ -35,6 +35,31 @@ describe('syncReader', () => {
     expect(r.warnings.some((w) => w.includes('missing.jpg'))).toBe(true);
   });
 
+  it('syncs newsletters, feed items and tweets too, and says what it left out', async () => {
+    const { fake, output, deps } = setup();
+    const base = fake.documents[0]!;
+    const extra = (id: string, category: string) => ({ ...base, id, title: `A ${category}`, url: `https://read.readwise.io/read/${id}`, category });
+    fake.documents.push(extra('01tweet', 'tweet'), extra('01email', 'email'), extra('01rss', 'rss'), extra('01pdf', 'pdf'), extra('01video', 'video'));
+    const r = await syncReader(deps);
+    expect(r.added).toBe(7);
+    for (const id of ['01tweet', '01email', '01rss']) expect([...output.files.keys()].some((f) => f.includes(id))).toBe(true);
+    expect([...output.files.keys()].some((f) => f.includes('01pdf') || f.includes('01video'))).toBe(false);
+    expect(r.warnings).toContain("Left out 2 Reader items Inkwise can't turn into an EPUB (pdf, video).");
+    // Several categories means one unfiltered request, filtered here.
+    expect(fake.requests.some((q) => q.url.includes('/list/') && q.url.includes('category=') && !q.url.includes('category=highlight'))).toBe(false);
+  });
+
+  it('counts only kept documents toward the limit, and still takes one category or all', async () => {
+    const { fake, deps } = setup();
+    const base = fake.documents[0]!;
+    fake.documents.unshift({ ...base, id: '01pdffirst', title: 'A pdf', category: 'pdf' });
+    expect((await syncReader(deps, { limit: 2, dryRun: true })).items).toHaveLength(2);
+    const one = await syncReader(deps, { category: 'pdf', dryRun: true });
+    expect(one.items.map((i) => i.id)).toEqual(['01pdffirst']);
+    expect(fake.requests.some((q) => q.url.includes('category=pdf'))).toBe(true);
+    expect((await syncReader(deps, { category: null, dryRun: true })).items).toHaveLength(5);
+  });
+
   it('keeps a highlight queued while the sync is running', async () => {
     const { fake, client, manifest, deps } = setup();
     const doc = fake.documents[0]!;
@@ -59,7 +84,8 @@ describe('syncReader', () => {
     const doc = fake.documents.find((d) => d.id.includes('longform'))!;
     const articleOf = () => {
       const bytes = output.files.get(epubFilename(doc))!;
-      return strFromU8(unzipSync(bytes)['OEBPS/article.xhtml']!);
+      // Underline marks (one before each highlighted character) left out, to compare the words.
+      return strFromU8(unzipSync(bytes)['OEBPS/article.xhtml']!).replace(/\u0332/g, '');
     };
     const at = '2026-10-08T02:00:00Z';
     fake.highlights.push({ id: 'hlA', parent_id: doc.id, content: 'None of this is new.', notes: '', tags: [], createdAt: at, updatedAt: at });
@@ -90,6 +116,24 @@ describe('syncReader', () => {
     const again = await syncReader(deps);
     expect(again.updated).toBe(1);
     expect(manifest.manifest.documents[doc.id]!.marked).toBe(highlightsKey(['None of this is new.']));
+    // Picking another style in settings redoes it too.
+    expect((await syncReader(deps, { highlightStyle: 'bold' })).updated).toBe(1);
+    expect((await syncReader(deps, { highlightStyle: 'bold' })).updated).toBe(0);
+  });
+
+  it('rewrites a file it finds on disk when it has highlights to show (after a reinstall wiped the manifest)', async () => {
+    const { fake, output, manifest, deps } = setup();
+    const doc = fake.documents.find((d) => d.id.includes('longform'))!;
+    const at = '2026-10-08T02:00:00Z';
+    fake.highlights.push({ id: 'hlA', parent_id: doc.id, content: 'None of this is new.', notes: '', tags: [], createdAt: at, updatedAt: at });
+    await syncReader(deps, { showHighlights: false });
+    manifest.manifest = { ...manifest.manifest, documents: {}, docHighlights: {}, highlightsSyncedAt: undefined };
+    const r = await syncReader(deps);
+    expect(r.items.find((i) => i.id === doc.id)?.action).toBe('updated');
+    expect(r.items.filter((i) => i.action === 'adopted')).toHaveLength(3);
+    expect(strFromU8(unzipSync(output.files.get(epubFilename(doc))!)['OEBPS/article.xhtml']!).replace(/\u0332/g, '')).toContain(
+      '<span class="rw-hl">None of this is new.</span>',
+    );
   });
 
   it('leaves EPUBs plain when highlights are turned off', async () => {

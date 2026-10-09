@@ -1,6 +1,6 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { markHighlights } from './marks.js';
-import { HIGHLIGHT_CSS } from './markStyle.js';
+import { highlightCss, type HighlightStyle } from './markStyle.js';
 import { cleanHtml, escapeAttr, escapeText } from './html.js';
 import type { ReaderDocument } from './types.js';
 
@@ -18,8 +18,10 @@ export interface BuildEpubOptions {
   /** Timestamp for `dcterms:modified`. Pass a fixed value in tests for reproducible output. */
   modified?: Date;
   language?: string;
-  /** Highlight texts to shade in the article (see marks.ts). */
+  /** Highlight texts to mark in the article (see marks.ts). */
   highlights?: string[];
+  /** How marked highlights look (see markStyle.ts). */
+  highlightStyle?: HighlightStyle;
 }
 
 export interface BuiltEpub {
@@ -42,7 +44,7 @@ pre { white-space: pre-wrap; word-wrap: break-word; font-size: 0.85em; border: 1
 code { font-size: 0.9em; }
 img { max-width: 100%; height: auto; }
 figure { margin: 1em 0; text-align: center; }
-${HIGHLIGHT_CSS}figcaption { font-size: 0.85em; font-style: italic; }
+figcaption { font-size: 0.85em; font-style: italic; }
 table { border-collapse: collapse; max-width: 100%; font-size: 0.85em; }
 td, th { border: 1px solid #000; padding: 0.2em 0.4em; vertical-align: top; }
 a { color: inherit; text-decoration: underline; }
@@ -137,8 +139,8 @@ ${lines.join('\n')}
 `;
 }
 
-function withHighlights(xhtml: string, highlights?: string[]): string {
-  return highlights?.length ? markHighlights(xhtml, highlights).xhtml : xhtml;
+function withHighlights(xhtml: string, highlights?: string[], style?: HighlightStyle): string {
+  return highlights?.length ? markHighlights(xhtml, highlights, style).xhtml : xhtml;
 }
 
 export function buildEpub(doc: ReaderDocument, opts: BuildEpubOptions = {}): BuiltEpub {
@@ -234,8 +236,8 @@ ${manifestImages ? `${manifestImages}\n` : ''}  </manifest>
     'OEBPS/content.opf': strToU8(opf),
     'OEBPS/nav.xhtml': strToU8(nav),
     'OEBPS/toc.ncx': strToU8(ncx),
-    'OEBPS/style.css': strToU8(EPUB_CSS),
-    'OEBPS/article.xhtml': strToU8(withHighlights(renderArticleXhtml(doc, body, language), opts.highlights)),
+    'OEBPS/style.css': strToU8(EPUB_CSS + highlightCss(opts.highlightStyle)),
+    'OEBPS/article.xhtml': strToU8(withHighlights(renderArticleXhtml(doc, body, language), opts.highlights, opts.highlightStyle)),
   };
   for (const img of usedImages) files[`OEBPS/${img.path}`] = [img.data, { level: 0 }];
 

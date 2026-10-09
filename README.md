@@ -18,7 +18,7 @@ The plugin doesn't try to be a reader. Reading happens in the Supernote's built-
 
 ### Install
 
-1. Download `Inkwise.snplg` from the latest [CI run](../../actions/workflows/ci.yml) (artifact **Inkwise-snplg-&lt;version&gt;**) or from a [release](../../releases).
+1. Download `Inkwise-<version>.snplg` from the latest [CI run](../../actions/workflows/ci.yml) (artifact **Inkwise-snplg-&lt;version&gt;**) or from a [release](../../releases).
 2. Connect the Supernote over USB (or use your sync service) and copy the file into `MyStyle/`.
 3. On the device: **Settings → Apps → Plugins → Add Plugin**, pick Inkwise.
 4. Open Inkwise's settings from the plugin list and add your Readwise token. Either paste it (from [readwise.io/access_token](https://readwise.io/access_token)) or save it as `MyStyle/Inkwise/token.txt` and tap **Import token file**. Inkwise leaves the file where it is, so after a reinstall it reads the token from there by itself.
@@ -27,18 +27,18 @@ You need firmware with the plugin beta (Chauvet 3.29.4x on Manta and Nomad).
 
 ### Update
 
-Copy the new `Inkwise.snplg` over the old one in `MyStyle/` and add it again from **Add Plugin**, without uninstalling first. Every build has a higher version number than the one before, so the Manta should install it as an upgrade and keep your token, settings and permissions. The version shows at the bottom of Inkwise settings.
+Copy the new `Inkwise-<version>.snplg` into `MyStyle/` (each build has its own file name, so nothing clashes) and pick it from **Add Plugin**. Try that without uninstalling first: every build has a higher version number than the one before, so the Manta may install it as an upgrade and keep your token, settings and permissions. The version shows at the bottom of Inkwise settings.
 
 If you do uninstall, the Manta wipes the plugin's private folder and its permissions. Once you allow file access again, Inkwise reads the token back from `token.txt` and its settings and highlight queue from `MyStyle/Inkwise/backup/`.
 
 ### Use
 
-- **Sync Reader** (sidebar, NOTE and DOC): fetches your Later queue and writes EPUBs to `Document/Inkwise/`. Each one is named `Title__<readwise-id>.epub`.
-- **Send highlight** (DOC text-selection toolbar): sends the selected text as a highlight on the matching Reader document and marks the passage in the EPUB (underlined, and shaded grey where the reader draws backgrounds), with no popup, so you keep reading. Plugins can't draw a highlight on a DOC page, so the mark lives in the EPUB itself and reflows with any font size or margin. With no connection, the highlight is saved and sent on the next sync. A screen only opens when something needs you, such as text Readwise couldn't match.
+- **Sync Reader** (sidebar, NOTE and DOC): fetches your Later queue and writes EPUBs to `Document/Inkwise/`. Each one is named `Title__<readwise-id>.epub`. Articles, newsletters, feed items and tweets all come along; PDFs, EPUBs and videos you saved to Reader stay there, and the sync log says how many it left out.
+- **Send highlight** (DOC text-selection toolbar): sends the selected text as a highlight on the matching Reader document and marks the passage in the EPUB, with no popup, so you keep reading. By default the words get underlined. The Manta's reader ignores CSS underlines and can't put grey behind single words, so Inkwise draws the line with the font's combining low line (U+0332) before each character. Settings can switch to bold italic words or a grey paragraph instead. Plugins can't draw a highlight on a DOC page, so the mark lives in the EPUB itself and reflows with any font size or margin. With no connection, the highlight is saved and sent on the next sync. A screen only opens when something needs you, such as text Readwise couldn't match.
 - **Editing a highlight:** select a marked passage again and tap **Send highlight**. Instead of sending it twice, Inkwise opens it so you can add a note or delete it (in Readwise too).
 - **Done** (DOC sidebar): sends any queued highlights for the article and archives it in Reader. The open file stays put; the next sync moves it to `Document/Inkwise/Archive/` with its handwriting file (or keeps or deletes it; that's a setting).
 - Highlights you make in Reader elsewhere get marked on the next sync.
-- **Settings**: Reader location (Later, Shortlist, Inbox), tag filter, article limit, images on or off, marking highlights on or off, folder name, what Done does with the file, and a queue of highlights waiting to send or needing a fix.
+- **Settings**: Reader location (Later, Shortlist, Inbox), tag filter, article limit, images on or off, how highlights are marked (or not at all), folder name, what Done does with the file, and a queue of highlights waiting to send or needing a fix.
 
 ### Permissions
 
@@ -51,7 +51,7 @@ Inkwise asks for each one the first time it's needed, and says why.
 | File read | Seeing which articles are already in the folder, reading a renamed EPUB's id, reading `token.txt` and the backup |
 | File delete | The optional delete-on-Done setting |
 
-The token, the manifest and the highlight queue live in the plugin's private folder. Inkwise also copies the settings and the manifest (never the token) to `MyStyle/Inkwise/backup/`, so an uninstall doesn't lose them. Delete that folder to start fresh. If your Supernote syncs `MyStyle` to a cloud service, the backup and `token.txt` go along with it.
+The token, the manifest and the highlight queue live in the plugin's private folder. Inkwise also copies the settings and the manifest (never the token) to `MyStyle/Inkwise/backup/`, so an uninstall doesn't lose them. Delete that folder to start fresh. Inkwise also keeps a log of what it did in `MyStyle/Inkwise/inkwise-log.txt` (never the token), which is the first thing to look at when something misbehaves. If your Supernote syncs `MyStyle` to a cloud service, the backup, the log and `token.txt` go along with it.
 
 ## Getting highlights to match
 

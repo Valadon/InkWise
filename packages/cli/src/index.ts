@@ -27,6 +27,7 @@ import {
   configPath,
   expandHome,
   loadConfig,
+  parseCategory,
   readSession,
   writeSession,
   type Config,
@@ -50,7 +51,8 @@ Sync options:
   --out <dir>         Folder for --target folder (or dropbox/gdrive desktop folders)
   --location <loc>    later | shortlist | new | archive             (default later)
   --tag <tag>         Only documents with this tag (repeatable, max 5)
-  --category <c>      article (default) or "all"
+  --category <c>      Reader categories, comma separated, or "all"
+                      (default article,email,rss,tweet)
   --limit <n>         At most n documents
   --images / --no-images
   --remove-missing    Tidy up EPUBs whose documents left the queue
@@ -214,7 +216,7 @@ async function sync(config: Config, v: Record<string, any>) {
   const includeImages = v['no-images'] ? false : v.images ?? config.images;
   const limit = v.limit ? Number(v.limit) : config.limit;
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) throw new UserError('--limit must be a positive whole number.');
-  const category = v.category ? (v.category === 'all' ? null : v.category) : config.category;
+  const category = v.category ? parseCategory(v.category) : config.category;
   const imageFetch: FetchLike = v.mock
     ? f
     : (url, init) => fetch(url, { ...(init as RequestInit), headers: { 'User-Agent': 'Mozilla/5.0 (Inkwise EPUB builder)', ...(init?.headers ?? {}) } }) as any;

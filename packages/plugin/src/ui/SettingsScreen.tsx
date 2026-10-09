@@ -14,6 +14,7 @@ export function SettingsScreen({ app, onClose }: { app: InkwiseApp; onClose: () 
   const [queueMsg, setQueueMsg] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [markMsg, setMarkMsg] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setSettings(await app.settings());
@@ -95,7 +96,26 @@ export function SettingsScreen({ app, onClose }: { app: InkwiseApp; onClose: () 
           onEndEditing={(e) => update({ maxArticles: Number(e.nativeEvent.text) })}
         />
         <Toggle label="Images" value={settings.images} onChange={(images) => update({ images })} />
-        <Toggle label="Mark highlights in articles" value={settings.showHighlights} onChange={(showHighlights) => update({ showHighlights })} />
+        <Choice
+          label="Mark highlights in articles"
+          value={settings.showHighlights ? settings.highlightStyle : 'off'}
+          options={[
+            { value: 'underline', label: 'Underlined words' },
+            { value: 'bold', label: 'Bold italic words' },
+            { value: 'paragraph', label: 'Shaded paragraph' },
+            { value: 'off', label: 'Off' },
+          ]}
+          onChange={(v) => update(v === 'off' ? { showHighlights: false } : { showHighlights: true, highlightStyle: v })}
+        />
+        {settings.showHighlights ? (
+          <>
+            <Line small>Articles you already have change on your next sync, or right away with this button.</Line>
+            <Row>
+              <Button label="Mark highlights now" disabled={busy} onPress={() => run(() => app.markAll(), setMarkMsg)} />
+            </Row>
+            {markMsg ? <Line strong>{markMsg}</Line> : null}
+          </>
+        ) : null}
         <Field label="Folder inside Document" defaultValue={settings.folderName} onEndEditing={(e) => update({ folderName: e.nativeEvent.text })} />
       </Section>
 
@@ -152,7 +172,7 @@ export function SettingsScreen({ app, onClose }: { app: InkwiseApp; onClose: () 
         {queueMsg ? <Line strong>{queueMsg}</Line> : null}
       </Section>
       <Line small>
-        Inkwise {BUILD.version} (build {BUILD.commit})
+        Inkwise {BUILD.version} (build {BUILD.commit}). If something goes wrong, the log is in {app.log.path.replace(`${STORAGE_ROOT}/`, '')}.
       </Line>
     </Page>
   );

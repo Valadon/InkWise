@@ -3,15 +3,19 @@ import { flushPending, type FlushResult } from './highlights.js';
 import { collectImages, type ImageProcessor } from './images.js';
 import { extractImageUrls } from './html.js';
 import { addDocHighlight, highlightsKey, updateManifest, withManifestLock, type Manifest, type ManifestDocument, type ManifestStore } from './manifest.js';
+import type { HighlightStyle } from './markStyle.js';
 import type { OutputAdapter } from './output.js';
 import { NetworkError, ReadwiseClient, ReadwiseError } from './readwise.js';
-import type { FetchLike, ReaderDocument } from './types.js';
+import { READABLE_CATEGORIES, type FetchLike, type ReaderDocument } from './types.js';
 
 export interface SyncOptions {
   /** Reader location to pull from. Default `later`. */
   location?: string;
-  /** Reader category. Default `article`. Pass `null` for every category. */
-  category?: string | null;
+  /**
+   * Reader categories to sync: one, a list, or `null` for every category.
+   * Default READABLE_CATEGORIES (articles, newsletters, feed items, tweets).
+   */
+  category?: string | readonly string[] | null;
   /** Only documents with all of these tags (max 5). */
   tags?: string[];
   limit?: number;
@@ -25,8 +29,10 @@ export interface SyncOptions {
   force?: boolean;
   /** Per-EPUB image budget in bytes. */
   imageBudgetBytes?: number;
-  /** Shade Readwise highlights in the EPUBs. Default true. */
+  /** Mark Readwise highlights in the EPUBs. Default true. */
   showHighlights?: boolean;
+  /** How marked highlights look. */
+  highlightStyle?: HighlightStyle;
 }
 
 export interface SyncDeps {
@@ -89,13 +95,29 @@ export async function syncReader(deps: SyncDeps, opts: SyncOptions = {}): Promis
   };
 
   say('Fetching your Reader queue…');
+  const wanted: readonly string[] | null = opts.category === undefined ? READABLE_CATEGORIES : opts.category === null ? null : [opts.category].flat();
+  /** Documents left out because of their category, counted so the user knows they exist. */
+  const leftOut = new Map<string, number>();
   const docs = await deps.client.listDocuments({
     location: opts.location ?? 'later',
-    category: opts.category === null ? undefined : opts.category ?? 'article',
+    // Reader filters one category itself; for several, ask for all and filter here.
+    category: wanted?.length === 1 ? wanted[0] : undefined,
+    accept:
+      wanted && wanted.length > 1
+        ? (d) => {
+            if (wanted.includes(d.category)) return true;
+            leftOut.set(d.category, (leftOut.get(d.category) ?? 0) + 1);
+            return false;
+          }
+        : undefined,
     tags: opts.tags,
     withHtmlContent: true,
     limit: opts.limit,
   });
+  if (leftOut.size) {
+    const n = [...leftOut.values()].reduce((a, b) => a + b, 0);
+    warnings.push(`Left out ${n} Reader ${n === 1 ? 'item' : 'items'} Inkwise can't turn into an EPUB (${[...leftOut.keys()].join(', ')}).`);
+  }
   say(`Found ${docs.length} ${docs.length === 1 ? 'article' : 'articles'}.`);
 
   const showHighlights = opts.showHighlights ?? true;
@@ -112,7 +134,7 @@ export async function syncReader(deps: SyncDeps, opts: SyncOptions = {}): Promis
 
   const items: SyncItemResult[] = [];
   let written = 0;
-  const toWrite = docs.filter((d) => needsWrite(d, manifest, existingById, opts.force, showHighlights));
+  const toWrite = docs.filter((d) => needsWrite(d, manifest, existingById, opts.force, showHighlights, opts.highlightStyle));
   for (const doc of docs) {
     const title = doc.title?.trim() || 'Untitled';
     const filename = epubFilename(doc);
@@ -155,7 +177,7 @@ export async function syncReader(deps: SyncDeps, opts: SyncOptions = {}): Promis
         }
       }
       const highlights = showHighlights ? manifest.docHighlights[doc.id] : undefined;
-      const epub = buildEpub(doc, { images, includeImages, modified: now(), highlights });
+      const epub = buildEpub(doc, { images, includeImages, modified: now(), highlights, highlightStyle: opts.highlightStyle });
       const isUpdate = !!onDisk || !!entry;
       if (!opts.dryRun) {
         await deps.output.put(epub.filename, epub.bytes);
@@ -172,7 +194,7 @@ export async function syncReader(deps: SyncDeps, opts: SyncOptions = {}): Promis
           author: doc.author,
           sourceUrl: doc.source_url,
           syncedAt: now().toISOString(),
-          marked: highlightsKey(highlights),
+          marked: highlightsKey(highlights, opts.highlightStyle),
         });
       }
       items.push({ id: doc.id, title, filename: epub.filename, action: isUpdate ? 'updated' : 'added' });
@@ -242,13 +264,16 @@ function needsWrite(
   existingById: Map<string, string>,
   force?: boolean,
   showHighlights = true,
+  style?: HighlightStyle,
 ): boolean {
   if (force) return true;
   const entry = manifest.documents[doc.id];
   const onDisk = existingById.get(doc.id);
   if (!onDisk) return true;
-  if (!entry) return false; // adopt the other tool's copy
-  if (showHighlights && (entry.marked ?? '') !== highlightsKey(manifest.docHighlights[doc.id])) return true;
+  // Adopt a copy written by the other tool (or before a reinstall wiped the
+  // manifest), unless it should show highlights it can't be known to have.
+  if (!entry) return showHighlights && highlightsKey(manifest.docHighlights[doc.id], style) !== '';
+  if (showHighlights && (entry.marked ?? '') !== highlightsKey(manifest.docHighlights[doc.id], style)) return true;
   return entry.updatedAt !== doc.updated_at || entry.filename !== onDisk;
 }
 
