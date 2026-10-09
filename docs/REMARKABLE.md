@@ -73,7 +73,7 @@ Installing by hand, until there's a Vellum package:
 2. Copy `inkwise-app-<version>.tar.gz` to the tablet and run `tar -xzf inkwise-app-<version>.tar.gz -C /home/root/xovi/exthome/appload/`.
 3. Open AppLoad, tap its refresh button, then open InkWise.
 
-To update, stop the running backend first (`pkill -f "inkwise-rm appload"`), since a running binary can't be overwritten, then repeat step 2 and reopen InkWise.
+To update, stop the running backend first, since a running binary can't be overwritten: in InkWise set Automatic sync to Off and tap Close (the tablet has no `pkill`; `killall inkwise-rm` is the terminal fallback). Then repeat step 2, reopen InkWise and turn automatic sync back on.
 
 Limit: AppLoad starts the backend when the app is opened, so after the tablet (or the reading app) restarts, automatic sync resumes once InkWise is opened again. A systemd timer would remove that, at the cost of writing to the read-only system partition; Vellum's `systemdunits` support is the clean way to do it once this ships as a package.
 
