@@ -24,6 +24,14 @@ Rectangle {
     })
     property bool loaded: false
     property bool editingToken: false
+    // Times are shown as "5 min ago": the tablet's clock runs on UTC, so a clock time would be hours off.
+    property real nowMs: Date.now()
+    Timer {
+        interval: 60000
+        running: true
+        repeat: true
+        onTriggered: root.nowMs = Date.now()
+    }
 
     signal close
     function unloading() {
@@ -38,27 +46,41 @@ Rectangle {
             if (type !== 100) return;
             root.app = JSON.parse(contents);
             root.loaded = true;
+            root.nowMs = Date.now();
             if (root.app.connected && root.app.tokenMessage === "Connected to Readwise.") root.editingToken = false;
         }
     }
 
-    // "2026-10-08T23:02:00.000Z [sent] (yellow) text" -> "Oct 8, 5:02 PM  Sent (yellow): text"
+    // "2026-10-08T23:02:00.000Z [sent] (yellow) text" -> "5 min ago   Sent (yellow): text"
     function logLine(line) {
         const space = line.indexOf(" ");
-        const d = new Date(line.slice(0, space));
+        const at = line.slice(0, space);
         const rest = line.slice(space + 1).replace(/^\[sent\] \(([^)]*)\) /, "Sent ($1): ").replace(/^\[([a-z_]+)\] \(([^)]*)\) /, "$1 ($2): ").replace(/^warning: /, "Warning: ");
-        return (isNaN(d.getTime()) ? "" : Qt.formatDateTime(d, "MMM d, h:mm AP") + "   ") + rest;
+        return (isNaN(Date.parse(at)) ? "" : ago(at) + "   ") + rest;
     }
 
     function send(type, body) { backend.sendMessage(type, JSON.stringify(body || {})); }
     Component.onCompleted: send(1)
 
-    function when(iso) {
+    // "just now", "5 min ago", "2 hours ago", "yesterday", "3 days ago"
+    function ago(iso) {
         if (!iso) return "";
-        const d = new Date(iso);
-        const today = new Date();
-        const time = Qt.formatDateTime(d, "h:mm AP");
-        return d.toDateString() === today.toDateString() ? "today at " + time : Qt.formatDateTime(d, "MMM d") + " at " + time;
+        const mins = Math.floor((root.nowMs - Date.parse(iso)) / 60000);
+        if (mins < 1) return "just now";
+        if (mins < 60) return mins + " min ago";
+        const hours = Math.floor(mins / 60);
+        if (hours < 24) return hours === 1 ? "an hour ago" : hours + " hours ago";
+        const days = Math.floor(hours / 24);
+        return days === 1 ? "yesterday" : days + " days ago";
+    }
+
+    // "in a moment", "in 25 min", "in 2 hours"
+    function fromNow(iso) {
+        const mins = Math.ceil((Date.parse(iso) - root.nowMs) / 60000);
+        if (mins <= 1) return "in a moment";
+        if (mins < 60) return "in " + mins + " min";
+        const hours = Math.round(mins / 60);
+        return hours === 1 ? "in about an hour" : "in about " + hours + " hours";
     }
 
     // A tappable box. Filled black when `on`.
@@ -164,7 +186,7 @@ Rectangle {
             }
             Body {
                 visible: !!root.app.last && !root.app.syncing
-                text: root.app.last ? "Last sync " + root.when(root.app.last.at) + (root.app.last.ok ? "" : " didn’t finish") : ""
+                text: root.app.last ? (root.app.last.ok ? "Last sync " : "Last sync didn’t finish, ") + root.ago(root.app.last.at) : ""
                 font.bold: true
             }
             Body {
@@ -270,7 +292,7 @@ Rectangle {
                 color: "#333333"
                 font.pixelSize: root.smallSize
                 text: root.app.settings.autoSyncMinutes
-                    ? "Also syncs shortly after the tablet wakes up." + (root.app.nextSyncAt && root.app.connected ? " Next one " + root.when(root.app.nextSyncAt) + "." : "")
+                    ? "Also syncs shortly after the tablet wakes up." + (root.app.nextSyncAt && root.app.connected ? " Next one " + root.fromNow(root.app.nextSyncAt) + "." : "")
                       + " Runs while InkWise has been opened since the tablet last started."
                     : "Only when you tap Sync now."
             }

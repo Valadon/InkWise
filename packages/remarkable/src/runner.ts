@@ -4,6 +4,7 @@ import { ReadwiseClient, ReadwiseError, describeSyncError, NetworkError, summari
 import { FakeReadwise } from '@inkwise/core/testing';
 import { sendDeviceHighlights } from './highlightSync.js';
 import { Librarian, type LibraryControl } from './librarian.js';
+import { TabletReadwiseClient, describeSkipped } from './readerQueue.js';
 import { highlightColorName } from './rmHighlights.js';
 import { SAMPLE_DOCUMENT } from './sample.js';
 import { XOCHITL_DIR, XochitlOutput } from './xochitl.js';
@@ -210,16 +211,16 @@ export async function runSync(opts: RunOptions): Promise<RunResult> {
 
   return withSyncLock(opts.home, async () => {
     const settings = await loadSettings(opts.home);
-    let client: ReadwiseClient;
+    let client: TabletReadwiseClient;
     let imageFetch: FetchLike | undefined = realFetch;
     if (opts.mock) {
       const fake = new FakeReadwise({ documents: [SAMPLE_DOCUMENT] });
-      client = new ReadwiseClient({ token: fake.token, fetch: fake.fetch, sleep: async () => {} });
+      client = new TabletReadwiseClient({ token: fake.token, fetch: fake.fetch, sleep: async () => {} });
       imageFetch = undefined;
     } else {
       const token = await readToken(opts.home);
       if (!token) throw new NoToken();
-      client = new ReadwiseClient({ token, fetch: realFetch, onRateLimit: (s) => say(`Readwise asked us to wait ${s}s…`) });
+      client = new TabletReadwiseClient({ token, fetch: realFetch, onRateLimit: (s) => say(`Readwise asked us to wait ${s}s…`) });
     }
     const manifest = textManifestStore({ read: () => readText(p.manifest), write: (t) => writeText(p.manifest, t) });
     const libraryControl = opts.libraryControl === undefined ? await Librarian.connect() : opts.libraryControl;
@@ -243,9 +244,14 @@ export async function runSync(opts: RunOptions): Promise<RunResult> {
         highlightsSent = c.sent ?? 0;
         say(`Highlights: ${c.sent ?? 0} sent, ${c.duplicate ?? 0} already in Readwise, ${(c.queued_offline ?? 0) + (c.needs_attention ?? 0)} waiting.`);
       }
+      const built = (await manifest.load()).documents;
+      for (const id of await output.openedReaderIds()) {
+        if (built[id]?.updatedAt) client.opened.set(id, built[id].updatedAt);
+      }
       const result = await syncReader(
         { client, output, manifest, fetchImages: imageFetch, onProgress: (m) => say(m), now },
-        { location: opts.location ?? settings.location, limit: opts.limit, dryRun: opts.dryRun, showHighlights: false, includeImages: !!imageFetch },
+        // Every category: the client keeps the ones that make a book.
+        { location: opts.location ?? settings.location, category: null, limit: opts.limit, dryRun: opts.dryRun, showHighlights: false, includeImages: !!imageFetch },
       );
       for (const w of result.warnings) say(`warning: ${w}`, true);
       // Reader bumps an article whenever it gets a highlight, so core asks to rebuild it;
@@ -256,6 +262,8 @@ export async function runSync(opts: RunOptions): Promise<RunResult> {
       if (highlightsSent) summary += ` Sent ${highlightsSent} ${highlightsSent === 1 ? 'highlight' : 'highlights'} to Readwise.`;
       highlightsSent += result.highlights.sent;
       if (kept) summary += ` Left ${kept} ${kept === 1 ? 'article' : 'articles'} you've opened as ${kept === 1 ? 'it is' : 'they are'}.`;
+      const skipped = describeSkipped(client.skipped);
+      if (skipped) summary += ` ${skipped}`;
     } catch (err) {
       error = err;
       summary = isAuthError(err)

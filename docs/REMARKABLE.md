@@ -63,6 +63,17 @@ A book is never replaced once it's been opened (it has page files, a saved layou
 - The backend keeps running after the screen closes and syncs on its own: on the chosen interval while the tablet is awake, and about 15 seconds after it wakes up (it notices wall-clock time jumping between its 30-second ticks). After failing to reach Readwise it tries again within 5 minutes. With automatic sync off, closing the screen stops the backend.
 - It never restarts the reading app: it runs inside it, and you might be mid-page. Without librarian, new articles wait for the next restart.
 - The terminal command and the app share one sync routine (`src/runner.ts`), one lock file (so they never sync at the same time), and the same state, so articles are never added twice.
+- Times show as "5 min ago": the tablet's time zone is UTC, so clock times came out hours off.
+
+What comes over: everything Reader keeps as a web page, which is the `article`, `email` (newsletters), `rss` and `tweet` categories (`src/readerQueue.ts`). Reader files a saved X post as `tweet`, so core's default of `article` alone missed them. PDFs, EPUBs and videos stay in Reader and the sync summary says how many it skipped. Books already opened on the tablet are listed to core as unchanged, so they aren't downloaded and rebuilt every time Reader bumps them (it does whenever a highlight arrives) only to be left alone.
+
+Installing by hand, until there's a Vellum package:
+
+1. In reManager, install `appload` and `librarian`. AppLoad may not create its folder; if `/home/root/xovi/exthome/appload` is missing, `mkdir -p` it.
+2. Copy `inkwise-app-<version>.tar.gz` to the tablet and run `tar -xzf inkwise-app-<version>.tar.gz -C /home/root/xovi/exthome/appload/`.
+3. Open AppLoad, tap its refresh button, then open InkWise.
+
+To update, stop the running backend first (`pkill -f "inkwise-rm appload"`), since a running binary can't be overwritten, then repeat step 2 and reopen InkWise.
 
 Limit: AppLoad starts the backend when the app is opened, so after the tablet (or the reading app) restarts, automatic sync resumes once InkWise is opened again. A systemd timer would remove that, at the cost of writing to the read-only system partition; Vellum's `systemdunits` support is the clean way to do it once this ships as a package.
 
@@ -90,7 +101,7 @@ Use the reMarkable cloud API (like rmapi) from a server or scheduled job instead
 3. ~~Document writer~~ Done, against a fake library folder: `xochitl.ts` (`XochitlOutput`) puts Reader EPUBs in an "Inkwise" folder, archives to "Inkwise/Archive", sends removed ones to the tablet's trash, and never replaces a book that has annotations. `highlightSync.ts` sends every highlight on every Inkwise book to Readwise; a full round trip passes against the fake Readwise API.
 4. ~~Check the `.metadata`/`.content` we write against a real one~~ Done against Lance's Paper Pro on software 3.28.0.172: metadata now has the same fields, and EPUBs still use the flat `pages` list (`formatVersion: 1`), which `pageOrder` reads. The `.pdf` xochitl renders from an EPUB has broken ligature mappings ("E cient", "o site"), which is where the garbled highlight text comes from; we match against the EPUB text instead.
 5. ~~Device runtime~~ Done: `inkwise-rm`, one aarch64 binary (`bun build --compile`). Tested on Lance's Paper Pro with real Readwise. Uses librarian when it's installed; otherwise restarts xochitl only when `XochitlOutput.needsRestart` is set.
-6. ~~AppLoad screen and automatic syncing~~ Built (0.2.0-test1), checked on desktop Qt at both tablets' screen sizes and against a stand-in for AppLoad's socket. Needs a device test.
+6. ~~AppLoad screen and automatic syncing~~ Built and tried on the Paper Pro (0.2.0-test1): the app runs, finds librarian and sends highlights. That test missed an X post in Later (Reader calls it a `tweet`) and showed UTC times; 0.2.0-test2 fixes both and needs a device test.
 7. Vellum package so it installs from reManager, depending on `appload` and `librarian`. Vellum doesn't take pull requests written by AI agents, so the submission has to come from Lance.
 
 Open questions: whether growing an existing highlight should replace the old one in Readwise (today it adds a second one).

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { OutputAdapter, RemoteFile } from '@inkwise/core';
+import { idFromFilename, type OutputAdapter, type RemoteFile } from '@inkwise/core';
 import { assembleHighlights, type AssembledHighlight, type PagePiece } from './assemble.js';
 import { epubText, epubTitle } from './epubText.js';
 import type { LibraryControl } from './librarian.js';
@@ -185,6 +185,16 @@ export class XochitlOutput implements OutputAdapter {
       if (await this.isLive(uuid)) out.push({ filename, uuid });
     }
     return out;
+  }
+
+  /** Reader IDs of the books that have been opened here, which `put` leaves alone. */
+  async openedReaderIds(): Promise<Set<string>> {
+    const ids = new Set<string>();
+    for (const { filename, uuid } of await this.documents()) {
+      const readerId = idFromFilename(filename);
+      if (readerId && (await this.hasBeenOpened(uuid))) ids.add(readerId);
+    }
+    return ids;
   }
 
   /** Assembled highlights for one of our documents. */

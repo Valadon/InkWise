@@ -113,6 +113,15 @@ describe('XochitlOutput', () => {
     expect([...out.kept]).toEqual([FILE]);
   });
 
+  it('knows which Reader documents have been opened here', async () => {
+    const other = 'Other__01zzzzzzzzzzzzzzzzzzzzzzzz.epub';
+    await out.put(FILE, WIKI);
+    await out.put(other, makeEpub('Other', ['<p>x</p>']));
+    expect(await out.openedReaderIds()).toEqual(new Set());
+    writeFileSync(join(dir, 'xochitl', `${byName('Other').id}.pagedata`), '');
+    expect(await out.openedReaderIds()).toEqual(new Set(['01zzzzzzzzzzzzzzzzzzzzzzzz']));
+  });
+
   it('sends removed books to the trash and archived ones to Inkwise/Archive', async () => {
     await out.put(FILE, WIKI);
     const other = 'Other__01zzzzzzzzzzzzzzzzzzzzzzzz.epub';
